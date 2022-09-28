@@ -14,6 +14,14 @@ tmp*
 tags
 *.pkg
 
+# data files and plots
+*.png
+*.tif
+*.tiff
+*.pdf
+*.obj
+*.txt
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
