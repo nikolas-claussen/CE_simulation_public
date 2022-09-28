@@ -4,13 +4,13 @@
 __all__ = ['removekey', 'flatten', 'sort_vertices', 'sort_ids_by_vertices', 'get_neighbors', 'ListOfPtsAndFaces', 'HalfEdge',
            'Vertex', 'Face', 'Edge', 'get_half_edges', 'HalfEdgeMesh']
 
-# %% ../00_triangle_data_structure.ipynb 6
+# %% ../00_triangle_data_structure.ipynb 7
 def removekey(d, key):
     r = dict(d)
     del r[key]
     return r
 
-# %% ../00_triangle_data_structure.ipynb 9
+# %% ../00_triangle_data_structure.ipynb 10
 def flatten(lst, max_depth=1000, iter_count=0):
     """
     Flatten a list of lists into a list.
@@ -41,25 +41,35 @@ def flatten(lst, max_depth=1000, iter_count=0):
         else:
             yield el
 
-# %% ../00_triangle_data_structure.ipynb 10
+# %% ../00_triangle_data_structure.ipynb 11
 def sort_vertices(vertices: np.ndarray) -> np.ndarray:
     """Sort vertices of cycle counter clockwise by polar angle. Guaranteed to work for non-convex polygons."""
+    vertices -= np.mean(vertices, axis=0) # center
     phis = [np.arctan2(*x[::-1]) for x in vertices]
     return np.stack([x for _, x in sorted(zip(phis, vertices))])
 
 def sort_ids_by_vertices(ids: Iterable[int], vertices: Iterable[NDArray]) -> list:
     """Like sort_vertices, sort ids of cycle counter clockwise by polar angle."""
+    vertices -= np.mean(vertices, axis=0) # vertices
     phis = [np.arctan2(*x[::-1]) for x in vertices]
     return [x for _, x in sorted(zip(phis, ids))]
 
-# %% ../00_triangle_data_structure.ipynb 18
+# %% ../00_triangle_data_structure.ipynb 19
 def get_neighbors(faces):
-    """compute neighbor list by checking which triangles share 2 vertices. Note: this is quadratic"""
-    neighbors = {key: [nghb_key for nghb_key, pot_nghb in faces.items()
-                   if len(set(pot_nghb)&set(face)) == 2]
-             for key, face in faces.items()}
+    """compute neighbor list by checking which triangles share 2 vertices."""
+    edge_dict = defaultdict(list)
+    for key, fc in faces.items():
+        edges = [tuple(sorted((fc+[fc[0]])[i:i+2])) for i in range(len(fc))]
+        [edge_dict[e].append(key) for e in edges]
+
+    neighbors = defaultdict(list)
+    for edge, fcs in edge_dict.items():
+        if len(fcs) == 2:
+            neighbors[fcs[0]].append(fcs[1])
+            neighbors[fcs[1]].append(fcs[0])
     return neighbors
 
+# %% ../00_triangle_data_structure.ipynb 20
 class ListOfPtsAndFaces:
     def __init__(self, points, faces, neighbors=None):
         # if we pass lists, automatically assign ids to triangles and vertices
@@ -94,9 +104,23 @@ class ListOfPtsAndFaces:
         
     @staticmethod
     def fromObj(fname):
-        return None
+        """Read from .onj file. If {fname}_ids.txt is present, read ids from that."""
+        with open(fname+'.obj') as f:
+            lns = f.readlines()
+            points = [np.array([float(x) for x in ln[2:-1].split(" ")])[:2] # remove z-coord
+                      for ln in lns if ln.startswith("v")]
+            faces = [[int(x)-1 for x in ln[2:-1].split(" ")] # to start counting from 0 again
+                      for ln in lns if ln.startswith("f")]
+        if os.path.isfile(fname+'_ids.txt'): # read ids if defined
+            with open(fname+'_ids.txt') as f:
+                lns = f.readlines()
+                point_ids = [int(ln[2:-1]) for ln in lns if ln.startswith("v")]
+                face_ids = [int(ln[2:-1]) for ln in lns if ln.startswith("f")]
+            points = {ptid: pt for ptid, pt in zip(point_ids, points)}
+            faces = {fcid: fc for fcid, fc in zip(face_ids, faces)}
+        return ListOfPtsAndFaces(points, faces)
 
-# %% ../00_triangle_data_structure.ipynb 23
+# %% ../00_triangle_data_structure.ipynb 25
 @patch
 def saveObj(self:ListOfPtsAndFaces, fname, save_ids=False):
     """save as obj file. .obj automatically appended to fname. If save_ids is True, also save a list
@@ -114,11 +138,11 @@ def saveObj(self:ListOfPtsAndFaces, fname, save_ids=False):
         pass
     # write
     with open(fname+".obj", "a") as f:
-        f.write('# vertices')
+        f.write('# vertices\n')
         for pt in points_list:
             to_write = ' '.join(['v'] + [str(x) for x in pt] + ['0']) + '\n'  # include z-ccoord
             f.write(to_write)
-        f.write('# faces')
+        f.write('# faces\n')
         for fc in faces_list:
             to_write = ' '.join(['f'] + [str(x) for x in fc]) + '\n'
             f.write(to_write)
@@ -130,18 +154,19 @@ def saveObj(self:ListOfPtsAndFaces, fname, save_ids=False):
         with open(fname+"_ids.txt", "a") as f:
             f.write('# vertex IDs corresponding to .obj file\n')
             for key in vertex_keys:
-                f.write(str(key)+'\n')
+                f.write('v '+str(key)+'\n')
             f.write('# face IDs corresponding to .obj file\n')
             for key in face_keys:
-                f.write(str(key)+'\n')
+                f.write('f '+str(key)+'\n')
 
 
-# %% ../00_triangle_data_structure.ipynb 29
+# %% ../00_triangle_data_structure.ipynb 33
 @dataclass
 class HalfEdge:
     """Attribute holder class for half edges. Attributes point to other items."""
     _heid : int
     nxt: int
+    prev: int
     twin: int
     cell: Union[int, None] # None if it's a boundary
     vertices: tuple # 0 is origin, 1 is destination
@@ -171,55 +196,53 @@ class Edge:
     def __post_init__(self):
         assert (self.hes[0].twin == self.hes[1]._heid) and (self.hes[1].twin == self.hes[0]._heid)
 
-# %% ../00_triangle_data_structure.ipynb 35
+# %% ../00_triangle_data_structure.ipynb 40
 def get_half_edges(mesh: ListOfPtsAndFaces) -> Dict[int, HalfEdge]:
     """Create list of half-edges from a ListOfPtsAndFaces mesh"""
     heid_counter = 0
-    pre_hes = []
+    he_vertex_dict = dict()
     # first create half edges without their twins by going around each face.
+    # index them by their vertices to match twins after
     for key, fc in mesh.faces.items():
         # ensure face is oriented correctly
         fc = sort_ids_by_vertices(fc, [mesh.points[x] for x in fc])
         heids = [heid_counter+i for i in range(len(fc))]
-        nxts = np.roll(heids, -1).tolist()
+        nxts, prevs = (np.roll(heids, +1).tolist(), np.roll(heids, -1).tolist())
         vertices = [tuple((fc+[fc[0]])[i:i+2]) for i in range(len(fc))]
-        pre_hes += [HalfEdge(_heid, nxt, None, key, verts) for _heid, nxt, verts in zip(heids, nxts, vertices)]
+        for _heid, nxt, prev, verts in zip(heids, nxts, prevs, vertices):
+             he_vertex_dict[verts] = HalfEdge(_heid, prev, nxt, None, key, verts)
         heid_counter += len(fc)
-    # now match the half-edges. if they cannot match, add a new he with cell None (note: quadratic)
-    edges = mesh.get_combined_edges()
-    for e in edges:
-        if e[1][0] is not None: # interior edge
-            he1 = next(he for he in pre_hes if he.vertices == e[0])
-            he2 = next(he for he in pre_hes if he.vertices == e[0][::-1])
-        else: # exterior edge, add another half edge with
-            he1 = next(he for he in pre_hes if tuple(sorted(he.vertices)) == e[0])
-            # hardest part: find the "nxt":
-            he2 = HalfEdge(heid_counter, None, he1._heid, None, he1.vertices[::-1])
-            pre_hes.append(he2)
+    # now match the half-edges. if they cannot match, add a new he with cell None
+    hes = []
+    for he1 in he_vertex_dict.values():
+        try:
+            he2 = he_vertex_dict[he1.vertices[::-1]]
+        except KeyError:
+            he2 = HalfEdge(heid_counter, None, None, he1._heid, None, he1.vertices[::-1])
             heid_counter += 1
         he1.twin, he2.twin = (he2._heid, he1._heid)
+        hes.append(he1); hes.append(he2)
     # find the "next" of the boundary edges. we can just traverse inshallah
-    bdry = [he for he in pre_hes if he.cell is None]
+    bdry = [he for he in hes if he.cell is None]
     for he1 in bdry:
         try:
             nxt = next(he2 for he2 in bdry if he1.vertices[1] == he2.vertices[0])
-            he1.nxt = nxt._heid
+            prev = next(he2 for he2 in bdry if he1.vertices[0] == he2.vertices[1])
+            he1.nxt, he1.prev = (nxt._heid, prev._heid)
         except StopIteration:
             print("Corner detected")
-            
     # turn into dict for easy access
-    return {he._heid: he for he in pre_hes}
+    return {he._heid: he for he in hes}
 
-# %% ../00_triangle_data_structure.ipynb 39
+# %% ../00_triangle_data_structure.ipynb 43
 class HalfEdgeMesh:
     def __init__(self, mesh : ListOfPtsAndFaces):
         hes = get_half_edges(mesh)
         self.hes = hes
-        # note: below is quite inefficient
-        self.faces = {key: Face(key, [he for he in hes.values() if he.cell==key])
-                      for key in mesh.faces.keys()}
-        self.vertices = {key: Vertex(key, val, [he for he in hes.values() if he.vertices[1]==key])
-                         for key, val in mesh.points.items()}
+        self.faces = {key: Face(key, []) for key in mesh.faces.keys()}
+        [self.faces[he.cell].hes.append(he) for he in hes.values() if he.cell is not None]        
+        self.vertices = {key: Vertex(key, val, []) for key, val in mesh.points.items()}
+        [self.vertices[he.vertices[1]].incident.append(he) for he in hes.values()]
         self.edges = {he._heid: Edge(he._heid, (he, hes[he.twin]), None)
                       for he in hes.values() if he.vertices[0] < he.vertices[1]}
     
@@ -240,5 +263,5 @@ class HalfEdgeMesh:
     def fromObj(fname):
         return HalfEdgeMesh(ListOfPtsAndFaces.fromObj(fname))
 
-# %% ../00_triangle_data_structure.ipynb 49
+# %% ../00_triangle_data_structure.ipynb 77
 nbdev.nbdev_export()
