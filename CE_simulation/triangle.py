@@ -4,11 +4,32 @@
 __all__ = ['removekey', 'flatten', 'sort_vertices', 'sort_ids_by_vertices', 'get_neighbors', 'ListOfVerticesAndFaces', 'HalfEdge',
            'Vertex', 'Face', 'Edge', 'get_half_edges', 'HalfEdgeMesh']
 
+# %% ../00_triangle_data_structure.ipynb 3
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib as mpl
+
+from scipy import spatial
+
+# %% ../00_triangle_data_structure.ipynb 4
+from collections import defaultdict
+
+# %% ../00_triangle_data_structure.ipynb 5
+from dataclasses import dataclass
+from typing import Union, Dict, List, Tuple, Iterable
+from nptyping import NDArray, Int, Float, Shape
+
+from fastcore.foundation import patch
+
 # %% ../00_triangle_data_structure.ipynb 7
 def removekey(d, key):
     r = dict(d)
     del r[key]
     return r
+
+# %% ../00_triangle_data_structure.ipynb 8
+from bisect import bisect_left
 
 # %% ../00_triangle_data_structure.ipynb 10
 def flatten(lst, max_depth=1000, iter_count=0):
@@ -160,6 +181,9 @@ def saveObj(self:ListOfVerticesAndFaces, fname, save_ids=False):
                 f.write('f '+str(key)+'\n')
 
 
+# %% ../00_triangle_data_structure.ipynb 33
+from dataclasses import dataclass, field
+
 # %% ../00_triangle_data_structure.ipynb 34
 @dataclass
 class HalfEdge:
@@ -191,7 +215,7 @@ class Face:
     _fid : int
     hes : List[HalfEdge]
 
-# %% ../00_triangle_data_structure.ipynb 35
+# %% ../00_triangle_data_structure.ipynb 40
 # obsololete?
 @dataclass
 class Edge:
@@ -203,7 +227,7 @@ class Edge:
     def __post_init__(self):
         assert (self.hes[0].twin == self.hes[1]._heid) and (self.hes[1].twin == self.hes[0]._heid)
 
-# %% ../00_triangle_data_structure.ipynb 43
+# %% ../00_triangle_data_structure.ipynb 48
 def get_half_edges(mesh: ListOfVerticesAndFaces) -> Dict[int, HalfEdge]:
     """Create list of half-edges from a ListOfVerticesAndFaces mesh"""
     heid_counter = 0
@@ -241,7 +265,7 @@ def get_half_edges(mesh: ListOfVerticesAndFaces) -> Dict[int, HalfEdge]:
     # turn into dict for easy access
     return {he._heid: he for he in hes}
 
-# %% ../00_triangle_data_structure.ipynb 46
+# %% ../00_triangle_data_structure.ipynb 51
 class HalfEdgeMesh:
     def __init__(self, mesh : ListOfVerticesAndFaces):
         hes = get_half_edges(mesh)
@@ -269,7 +293,7 @@ class HalfEdgeMesh:
     def fromObj(fname):
         return HalfEdgeMesh(ListOfVerticesAndFaces.fromObj(fname))
 
-# %% ../00_triangle_data_structure.ipynb 62
+# %% ../00_triangle_data_structure.ipynb 67
 @patch
 def reset_hes(self: HalfEdgeMesh, face_or_vertex: Union[Face, Vertex]):
     """Re-create the full list of half edges belonging to a face or vertex based on its first half edge.
@@ -294,7 +318,7 @@ def reset_hes(self: HalfEdgeMesh, face_or_vertex: Union[Face, Vertex]):
             returned = (he == start_he)
         face_or_vertex.incident = new_hes
 
-# %% ../00_triangle_data_structure.ipynb 66
+# %% ../00_triangle_data_structure.ipynb 71
 @patch
 def flip_edge(self: HalfEdgeMesh, e: int):
     """Flip edge of a triangle mesh. Call by using he index
@@ -344,7 +368,7 @@ def flip_edge(self: HalfEdgeMesh, e: int):
     e.flipped, twin.flipped = (True, True)
         
 
-# %% ../00_triangle_data_structure.ipynb 78
+# %% ../00_triangle_data_structure.ipynb 83
 @patch
 def is_consistent(self: HalfEdgeMesh):
     """For debugging/testing purposes"""
@@ -366,7 +390,7 @@ def is_consistent(self: HalfEdgeMesh):
     
     return True
 
-# %% ../00_triangle_data_structure.ipynb 81
+# %% ../00_triangle_data_structure.ipynb 87
 @patch
 def triplot(self: HalfEdgeMesh):
     """wraps plt.triplot"""
@@ -374,3 +398,19 @@ def triplot(self: HalfEdgeMesh):
     fcs = np.array(list(list_format.faces.values()))
     pts = np.array(list(list_format.vertices.values())).T
     plt.triplot(pts[0], pts[1], fcs)
+
+# %% ../00_triangle_data_structure.ipynb 92
+@patch
+def get_edge_vecs(self: HalfEdgeMesh):
+    return {key: self.vertices[val.vertices[1]].coords-self.vertices[val.vertices[0]].coords
+            for key, val in self.hes.items()}
+
+@patch
+def get_edge_lens(self: HalfEdgeMesh):
+    return {key: np.linalg.norm(self.vertices[val.vertices[1]].coords-self.vertices[val.vertices[0]].coords)
+            for key, val in self.hes.items()}
+
+@patch
+def set_rest_lengths(self: HalfEdgeMesh):
+    for key, val in get_edge_lens.items():
+        self.hes[key].rest =  val
