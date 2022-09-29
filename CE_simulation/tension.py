@@ -20,6 +20,8 @@ from scipy import optimize
 
 from tqdm.notebook import tqdm
 
+import sys
+
 # %% ../01_tension_time_evolution.ipynb 5
 from dataclasses import dataclass
 from typing import Union, Dict, List, Tuple, Iterable
