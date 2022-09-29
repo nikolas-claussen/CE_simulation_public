@@ -160,7 +160,7 @@ def saveObj(self:ListOfVerticesAndFaces, fname, save_ids=False):
                 f.write('f '+str(key)+'\n')
 
 
-# %% ../00_triangle_data_structure.ipynb 33
+# %% ../00_triangle_data_structure.ipynb 34
 @dataclass
 class HalfEdge:
     """Attribute holder class for half edges. Attributes point to other items."""
@@ -170,7 +170,12 @@ class HalfEdge:
     twin: int
     face: Union[int, None] # None if it's a boundary
     vertices: tuple # 0 is origin, 1 is destination
-        
+    rest: float = 0.
+    passive: float = 0.
+    flipped: int = 0
+    variables : dict = field(default_factory=dict) 
+    # further variables for optimization. Maybe have rest, passive, flipped as true attribs?
+    
 @dataclass
 class Vertex:
     """Attribute holder class for vertices. Attributes point to other items. Note: different from the
@@ -185,7 +190,9 @@ class Face:
     """Attribute holder class for faces. Attributes point to other items."""
     _fid : int
     hes : List[HalfEdge]
-        
+
+# %% ../00_triangle_data_structure.ipynb 35
+# obsololete?
 @dataclass
 class Edge:
     """Attribute holder class for edges. Main point is to use it to store variables for ODE evolution"""
@@ -196,7 +203,7 @@ class Edge:
     def __post_init__(self):
         assert (self.hes[0].twin == self.hes[1]._heid) and (self.hes[1].twin == self.hes[0]._heid)
 
-# %% ../00_triangle_data_structure.ipynb 41
+# %% ../00_triangle_data_structure.ipynb 43
 def get_half_edges(mesh: ListOfVerticesAndFaces) -> Dict[int, HalfEdge]:
     """Create list of half-edges from a ListOfVerticesAndFaces mesh"""
     heid_counter = 0
@@ -218,7 +225,7 @@ def get_half_edges(mesh: ListOfVerticesAndFaces) -> Dict[int, HalfEdge]:
         try:
             he2 = he_vertex_dict[he1.vertices[::-1]]
         except KeyError:
-            he2 = HalfEdge(heid_counter, None, None, he1._heid, None, he1.vertices[::-1])
+            he2 = HalfEdge(heid_counter, None, None, he1._heid, None, he1.vertices[::-1],)
             heid_counter += 1
         he1.twin, he2.twin = (he2._heid, he1._heid)
         hes.append(he1); hes.append(he2)
@@ -234,7 +241,7 @@ def get_half_edges(mesh: ListOfVerticesAndFaces) -> Dict[int, HalfEdge]:
     # turn into dict for easy access
     return {he._heid: he for he in hes}
 
-# %% ../00_triangle_data_structure.ipynb 44
+# %% ../00_triangle_data_structure.ipynb 46
 class HalfEdgeMesh:
     def __init__(self, mesh : ListOfVerticesAndFaces):
         hes = get_half_edges(mesh)
@@ -243,8 +250,8 @@ class HalfEdgeMesh:
         [self.faces[he.face].hes.append(he) for he in hes.values() if he.face is not None]        
         self.vertices = {key: Vertex(key, val, []) for key, val in mesh.vertices.items()}
         [self.vertices[he.vertices[1]].incident.append(he) for he in hes.values()]
-        self.edges = {min(he._heid, he.twin): Edge(he._heid, (he, hes[he.twin]), {"flipped": False})
-                      for he in hes.values() if he.vertices[0] < he.vertices[1]}
+        #self.edges = {min(he._heid, he.twin): Edge(he._heid, (he, hes[he.twin]), {"flipped": False})
+        #              for he in hes.values() if he.vertices[0] < he.vertices[1]}
     
     def __deepcopy__(self):
         pass
@@ -262,7 +269,7 @@ class HalfEdgeMesh:
     def fromObj(fname):
         return HalfEdgeMesh(ListOfVerticesAndFaces.fromObj(fname))
 
-# %% ../00_triangle_data_structure.ipynb 60
+# %% ../00_triangle_data_structure.ipynb 62
 @patch
 def reset_hes(self: HalfEdgeMesh, face_or_vertex: Union[Face, Vertex]):
     """Re-create the full list of half edges belonging to a face or vertex based on its first half edge.
@@ -287,7 +294,7 @@ def reset_hes(self: HalfEdgeMesh, face_or_vertex: Union[Face, Vertex]):
             returned = (he == start_he)
         face_or_vertex.incident = new_hes
 
-# %% ../00_triangle_data_structure.ipynb 64
+# %% ../00_triangle_data_structure.ipynb 66
 @patch
 def flip_edge(self: HalfEdgeMesh, e: int):
     """Flip edge of a triangle mesh. Call by using he index
@@ -334,10 +341,10 @@ def flip_edge(self: HalfEdgeMesh, e: int):
     for vertex_or_face in [f0, f1]+[v3, v4, v2, v1]:
         self.reset_hes(vertex_or_face)
     # notifiy edge! return the _heid, or set "Flipped" or something!
-    self.edges[e._heid].variables["flipped"] = True
+    e.flipped, twin.flipped = (True, True)
         
 
-# %% ../00_triangle_data_structure.ipynb 76
+# %% ../00_triangle_data_structure.ipynb 78
 @patch
 def is_consistent(self: HalfEdgeMesh):
     """For debugging/testing purposes"""
@@ -359,7 +366,7 @@ def is_consistent(self: HalfEdgeMesh):
     
     return True
 
-# %% ../00_triangle_data_structure.ipynb 79
+# %% ../00_triangle_data_structure.ipynb 81
 @patch
 def triplot(self: HalfEdgeMesh):
     """wraps plt.triplot"""
@@ -367,6 +374,3 @@ def triplot(self: HalfEdgeMesh):
     fcs = np.array(list(list_format.faces.values()))
     pts = np.array(list(list_format.vertices.values())).T
     plt.triplot(pts[0], pts[1], fcs)
-
-# %% ../00_triangle_data_structure.ipynb 87
-nbdev.nbdev_export()
