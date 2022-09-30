@@ -2,7 +2,7 @@
 
 # %% auto 0
 __all__ = ['vectors_angle', 'sides_area', 'sides_circum', 'sides_angles', 'angles_shape', 'sides_area_jac', 'excitable_dt',
-           'excitable_dt_perim', 'excitable_dt_angles']
+           'excitable_dt_perim', 'excitable_dt_angles', 'excitable_dt_post']
 
 # %% ../01_tension_time_evolution.ipynb 4
 import os
@@ -190,7 +190,7 @@ def get_energy_fct(self: HalfEdgeMesh):
     
     return get_E, agrad(get_E)
 
-# %% ../01_tension_time_evolution.ipynb 48
+# %% ../01_tension_time_evolution.ipynb 47
 @patch
 def pre_optimize(self: HalfEdgeMesh, fact=.3, n_iter=1):
     """Greedy pre-optimization"""
@@ -206,5 +206,26 @@ def pre_optimize(self: HalfEdgeMesh, fact=.3, n_iter=1):
                 
 # for reasons which are fucking beyong me, as a patched class method this is very slow??
 
-# %% ../01_tension_time_evolution.ipynb 67
+# %% ../01_tension_time_evolution.ipynb 69
 from copy import deepcopy
+
+# %% ../01_tension_time_evolution.ipynb 73
+def excitable_dt_post(Ts, Tps, k=1, m=2):
+    """Time derivative of tensions under excitable tension model with constrained area,
+    with passive tension for post intercalation"""
+    dT_dt = Ts**m - k*Tps
+    dTp_dt = -k*Tps
+    area_jac = sides_area_jac(Ts)
+    area_jac /= norm(area_jac)
+    dT_dt -= area_jac * (area_jac@dT_dt)
+    return dT_dt, dTp_dt
+
+@patch
+def reset_rest_passive_flip(self: HalfEdgeMesh, e: HalfEdge):
+    """Reset rest length and passive tensions of flipped he according to myosin inheritance"""
+    twin = e.twin
+    rest_pre = (e.rest+twin.rest)/2
+    rest_neighbors = (e.nxt.rest+e.prev.rest+twin.nxt.rest+twin.prev.rest)/4
+    e.rest = rest_neighbors
+    e.passive = rest_pre-rest_neighbors
+    twin.rest, twin.passive = (e.rest, e.passive)
