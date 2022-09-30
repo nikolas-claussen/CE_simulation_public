@@ -188,18 +188,39 @@ from dataclasses import dataclass, field
 # %% ../00_triangle_data_structure.ipynb 33
 @dataclass
 class HalfEdge:
-    """Attribute holder class for half edges. Attributes point to other items."""
+    """Attribute holder class for half edges. Attributes point to other items, property methods get them."""
     _heid : int
-    nxt: int
-    prev: int
-    twin: int
-    face: Union[int, None] # None if it's a boundary
-    vertices: tuple # 0 is origin, 1 is destination
+    _nxtid: int
+    _previd: int
+    _twinid: int
+    _faceid: Union[int, None] # None if it's a boundary
+    _verticesid: tuple # 0 is origin, 1 is destination
     rest: float = 0.
     passive: float = 0.
     flipped: int = 0
-    variables : dict = field(default_factory=dict) 
-    # further variables for optimization. Maybe have rest, passive, flipped as true attribs?
+    variables: dict = field(default_factory=dict, repr=False) 
+    _hemesh: int = field(default=None, repr=False) # set during creation of mesh
+    duplicate: bool = False # arbitraily select half of all edges for future iteration convenience
+    # set methods to get the twins, nxts, and prevs using the internal use _ids to look them up in the dict
+    @property
+    def nxt(self):
+        return self._hemesh.hes[self._nxtid]
+    @property
+    def prev(self):
+        return self._hemesh.hes[self._previd]
+    @property
+    def twin(self):
+        return self._hemesh.hes[self._twinid]
+    @property
+    def face(self):
+        if self._faceid is None:
+            return None
+        return self._hemesh.faces[self._faceid]
+    @property
+    def vertices(self):
+        return [self._hemesh.vertices[v] for v in self._verticesid]
+    def __post_init__(self):
+        self.duplicate = self._verticesid[0] < self._verticesid[1]
     
 @dataclass
 class Vertex:
@@ -219,14 +240,17 @@ class Face:
 # %% ../00_triangle_data_structure.ipynb 34
 @patch
 def sort_hes(self: Face):
-    """Sort the list of hes of a face"""
+    """Sort the list of hes of a face."""
     sorted_hes = []
     returned = False
     start_he = self.hes[0]
     he = start_he
     while not returned:
         sorted_hes.append(he)
-        he = next(x for x in self.hes if x._heid == he.nxt)
+        if he._hemesh is not None:
+            he = he.nxt
+        else:
+            he = next(x for x in self.hes if x._heid == he._nxtid)
         returned = (he == start_he)
     self.hes = sorted_hes
 
@@ -253,28 +277,29 @@ def get_half_edges(mesh: ListOfVerticesAndFaces) -> Dict[int, HalfEdge]:
         # ensure face is oriented correctly
         fc = sort_ids_by_vertices(fc, [mesh.vertices[x] for x in fc])
         heids = [heid_counter+i for i in range(len(fc))]
-        nxts, prevs = (np.roll(heids, +1).tolist(), np.roll(heids, -1).tolist())
+        nxts, prevs = (np.roll(heids, -1).tolist(), np.roll(heids, +1).tolist())
         vertices = [tuple((fc+[fc[0]])[i:i+2]) for i in range(len(fc))]
-        for _heid, nxt, prev, verts in zip(heids, nxts, prevs, vertices):
-             he_vertex_dict[verts] = HalfEdge(_heid, prev, nxt, None, key, verts)
+        for _heid, _nxtid, _previd, _verticesid in zip(heids, nxts, prevs, vertices):
+             he_vertex_dict[_verticesid] = HalfEdge(_heid, _nxtid, _previd, None, key, _verticesid)
+                # is the order correct here??
         heid_counter += len(fc)
     # now match the half-edges. if they cannot match, add a new he with faec None
     hes = []
     for he1 in he_vertex_dict.values():
         try:
-            he2 = he_vertex_dict[he1.vertices[::-1]]
+            he2 = he_vertex_dict[he1._verticesid[::-1]]
         except KeyError:
-            he2 = HalfEdge(heid_counter, None, None, he1._heid, None, he1.vertices[::-1],)
+            he2 = HalfEdge(heid_counter, None, None, he1._heid, None, he1._verticesid[::-1],)
             heid_counter += 1
-        he1.twin, he2.twin = (he2._heid, he1._heid)
+        he1._twinid, he2._twinid = (he2._heid, he1._heid)
         hes.append(he1); hes.append(he2)
     # find the "next" of the boundary edges. we can just traverse inshallah
-    bdry = [he for he in hes if he.face is None]
+    bdry = [he for he in hes if he._faceid is None]
     for he1 in bdry:
         try:
-            nxt = next(he2 for he2 in bdry if he1.vertices[1] == he2.vertices[0])
-            prev = next(he2 for he2 in bdry if he1.vertices[0] == he2.vertices[1])
-            he1.nxt, he1.prev = (nxt._heid, prev._heid)
+            nxt = next(he2 for he2 in bdry if he1._verticesid[1] == he2._verticesid[0])
+            prev = next(he2 for he2 in bdry if he1._verticesid[0] == he2._verticesid[1])
+            he1._nxtid, he1._previd = (nxt._heid, prev._heid)
         except StopIteration:
             print("Corner detected")
     # turn into dict for easy access
@@ -286,19 +311,22 @@ class HalfEdgeMesh:
         hes = get_half_edges(mesh)
         self.hes = hes
         self.faces = {key: Face(key, []) for key in mesh.faces.keys()}
-        [self.faces[he.face].hes.append(he) for he in hes.values() if he.face is not None]
-        [fc.sort_hes() for fc in self.faces.values()]
+        [self.faces[he._faceid].hes.append(he) for he in hes.values() if he._faceid is not None]
         self.vertices = {key: Vertex(key, val, []) for key, val in mesh.vertices.items()}
-        [self.vertices[he.vertices[1]].incident.append(he) for he in hes.values()]
+        [self.vertices[he._verticesid[1]].incident.append(he) for he in hes.values()]
         #self.edges = {min(he._heid, he.twin): Edge(he._heid, (he, hes[he.twin]), {"flipped": False})
         #              for he in hes.values() if he.vertices[0] < he.vertices[1]}
+        for he in self.hes.values():
+            he._hemesh = self
+        [fc.sort_hes() for fc in self.faces.values()]
+
     
-    def __deepcopy__(self):
-        pass
+    #def __deepcopy__(self):
+    #    pass
     
     def to_ListOfVerticesAndFaces(self): # also not efficient
         vertices = {key: val.coords for key, val in self.vertices.items()}
-        faces = {key: set(flatten([he.vertices for he in val.hes]))
+        faces = {key: set(flatten([he._verticesid for he in val.hes]))
                  for key, val in self.faces.items()}
         return ListOfVerticesAndFaces(vertices, faces)
     
@@ -313,11 +341,12 @@ class HalfEdgeMesh:
 def get_test_hemesh():
     return HalfEdgeMesh(get_test_mesh())
 
-# %% ../00_triangle_data_structure.ipynb 58
-def get_test_mesh_large(x=np.linspace(0, 1, 25), y=np.linspace(0, 1, 50)):
+# %% ../00_triangle_data_structure.ipynb 59
+def get_test_mesh_large(x=np.linspace(0, 1, 25), y=np.linspace(0, 1, 50), noise=.0025):
     pts = np.stack(np.meshgrid(x, y))
     
-    noise =  np.random.normal(size=pts.shape, scale=.0025*(np.abs(x).mean()+np.abs(y).mean()))
+    np.random.seed(1241) # get consistent results
+    noise =  np.random.normal(size=pts.shape, scale=noise)
     noise[:,0,:] = noise[:,-1,:] = 0
     noise[:,:,0] = noise[:,:,-1] = 0
     pts += noise
@@ -326,10 +355,10 @@ def get_test_mesh_large(x=np.linspace(0, 1, 25), y=np.linspace(0, 1, 50)):
     tri = spatial.Delaunay(pts)
     return ListOfVerticesAndFaces(tri.points, tri.simplices)
 
-def get_test_hemesh_large(x=np.linspace(0, 1, 25), y=np.linspace(0, 1, 50)):
-    return HalfEdgeMesh(get_test_mesh_large(x=x, y=y))
+def get_test_hemesh_large(x=np.linspace(0, 1, 25), y=np.linspace(0, 1, 50), noise=.0025):
+    return HalfEdgeMesh(get_test_mesh_large(x=x, y=y, noise=noise))
 
-# %% ../00_triangle_data_structure.ipynb 65
+# %% ../00_triangle_data_structure.ipynb 66
 @patch
 def reset_hes(self: HalfEdgeMesh, face_or_vertex: Union[Face, Vertex]):
     """Re-create the full list of half edges belonging to a face or vertex based on its first half edge.
@@ -341,7 +370,7 @@ def reset_hes(self: HalfEdgeMesh, face_or_vertex: Union[Face, Vertex]):
         start_he = face_or_vertex.hes[0]
         he = start_he
         while not returned:
-            he = self.hes[he.nxt]
+            he = he.nxt
             new_hes.append(he)
             returned = (he == start_he)
         face_or_vertex.hes = new_hes
@@ -349,54 +378,54 @@ def reset_hes(self: HalfEdgeMesh, face_or_vertex: Union[Face, Vertex]):
         start_he = face_or_vertex.incident[0]
         he = start_he
         while not returned:
-            he = self.hes[self.hes[he.nxt].twin]
+            he = he.nxt.twin
             new_hes.append(he)
             returned = (he == start_he)
         face_or_vertex.incident = new_hes
 
-# %% ../00_triangle_data_structure.ipynb 69
+# %% ../00_triangle_data_structure.ipynb 70
 @patch
 def flip_edge(self: HalfEdgeMesh, e: int):
     """Flip edge of a triangle mesh. Call by using he index
     If the two adjacent faces are not triangles, it does not work!
     For variable name convention, see jerryyin.info/geometry-processing-algorithms/half-edge/"""
-    # collect the required objects
-    if self.hes[e].face is None or self.hes[self.hes[e].twin].face is None:
-        raise ValueError('Cannot flip boundary edge')
-    # by convention, always flip the edge with min index
-    e = min(e, self.hes[e].twin)
+    # by convention, always flip the duplicate
     e = self.hes[e]
-    e5 = self.hes[e.prev]
-    e4 = self.hes[e.nxt]
-    twin = self.hes[e.twin]
-    e1 = self.hes[twin.prev]
-    e0 = self.hes[twin.nxt]
+    e = e if e.duplicate else e.twin
+    if e._faceid is None or e.twin._faceid is None:
+        raise ValueError('Cannot flip boundary edge')
+    # collect the required objects
+    e5 = e.prev
+    e4 = e.nxt
+    twin = e.twin
+    e1 = twin.prev
+    e0 = twin.nxt
     # making sure the vertices and faces do not refer to any of the edges to be modified.
-    f0, f1 = [self.faces[e1.face], self.faces[e5.face]]
+    f0, f1 = [e1.face, e5.face]
     f0.hes, f1.hes = [[e1], [e5]]
-    v3, v4, v2, v1 = [self.vertices[he.vertices[1]] for he in [e0, e1, e4, e5]]
+    v3, v4, v2, v1 = [he.vertices[1] for he in [e0, e1, e4, e5]]
     v3.incident, v4.incident, v2.incident, v1.incident = [[he] for he in [e0, e1, e4, e5]]
     # recycle e, twin.
-    e.nxt = e5._heid
-    e.prev = e0._heid
-    e.face = f1._fid
-    e.vertices = (v3._vid, v2._vid)
-    twin.nxt = e1._heid
-    twin.prev = e4._heid
-    twin.face = f0._fid
-    twin.vertices = (v2._vid, v3._vid)
+    e._nxtid = e5._heid
+    e._previd = e0._heid
+    e._faceid = f1._fid
+    e._verticesid = (v3._vid, v2._vid)
+    twin._nxtid = e1._heid
+    twin._previd = e4._heid
+    twin._faceid = f0._fid
+    twin._verticesid = (v2._vid, v3._vid)
     # update next/prev values for the external edges
-    e0.nxt = e._heid
-    e1.nxt = e4._heid
-    e4.nxt = twin._heid
-    e5.nxt = e0._heid
-    e0.prev = e5._heid
-    e1.prev = twin._heid
-    e4.prev = e1._heid
-    e5.prev = e._heid
+    e0._nxtid = e._heid
+    e1._nxtid = e4._heid
+    e4._nxtid = twin._heid
+    e5._nxtid = e0._heid
+    e0._previd = e5._heid
+    e1._previd = twin._heid
+    e4._previd = e1._heid
+    e5._previd = e._heid
     # update the face of e0, e4
-    e0.face = f1._fid
-    e4.face = f0._fid
+    e0._faceid = f1._fid
+    e4._faceid = f0._fid
     # re-complete the list of half-edges for the vertices and faces
     for vertex_or_face in [f0, f1]+[v3, v4, v2, v1]:
         self.reset_hes(vertex_or_face)
@@ -407,32 +436,32 @@ def flip_edge(self: HalfEdgeMesh, e: int):
     
         
 
-# %% ../00_triangle_data_structure.ipynb 81
+# %% ../00_triangle_data_structure.ipynb 82
 @patch
 def is_consistent(self: HalfEdgeMesh):
     """For debugging/testing purposes"""
     # check next and prev relations are consistent with vertices
-    assert all([he.vertices[1] == self.hes[he.nxt].vertices[0]
-                and he.vertices[0] == self.hes[he.prev].vertices[1]
+    assert all([he.vertices[1] == he.nxt.vertices[0]
+                and he.vertices[0] == he.prev.vertices[1]
                 for he in self.hes.values()])
     # check half edges are registered in cells
-    assert all([he in self.faces[he.face].hes
+    assert all([he in he.face.hes
                 for he in self.hes.values() if he.face is not None])
     # check half edges are registered in vertices
-    assert all([he in self.vertices[he.vertices[1]].incident
+    assert all([he in he.vertices[1].incident
                 for he in self.hes.values()])
     # check twins have matching vertices
-    assert all([he.vertices == self.hes[he.twin].vertices[::-1]
+    assert all([he.vertices == he.twin.vertices[::-1]
                 for he in self.hes.values()])
     # check everybody is a triangle
     assert all([len(fc.hes) == 3 for fc in self.faces.values()])
     # check all triangles are sorted
-    assert all([all([(fc.hes[i].nxt == fc.hes[(i+1)%3]._heid) for i in range(3)])
+    assert all([all([(fc.hes[i].nxt == fc.hes[(i+1)%3]) for i in range(3)])
                 for fc in self.faces.values()])
     
     return True
 
-# %% ../00_triangle_data_structure.ipynb 86
+# %% ../00_triangle_data_structure.ipynb 87
 @patch
 def triplot(self: HalfEdgeMesh):
     """wraps plt.triplot"""
@@ -441,15 +470,15 @@ def triplot(self: HalfEdgeMesh):
     pts = np.array(list(list_format.vertices.values())).T
     plt.triplot(pts[0], pts[1], fcs)
 
-# %% ../00_triangle_data_structure.ipynb 90
+# %% ../00_triangle_data_structure.ipynb 91
 @patch
 def get_edge_vecs(self: HalfEdgeMesh):
-    return {key: self.vertices[val.vertices[1]].coords-self.vertices[val.vertices[0]].coords
+    return {key: val.vertices[1].coords-val.vertices[0].coords
             for key, val in self.hes.items()}
 
 @patch
 def get_edge_lens(self: HalfEdgeMesh):
-    return {key: np.linalg.norm(self.vertices[val.vertices[1]].coords-self.vertices[val.vertices[0]].coords)
+    return {key: np.linalg.norm(val.vertices[1].coords-val.vertices[0].coords)
             for key, val in self.hes.items()}
 
 @patch

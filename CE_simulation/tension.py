@@ -2,7 +2,7 @@
 
 # %% auto 0
 __all__ = ['vectors_angle', 'sides_area', 'sides_circum', 'sides_angles', 'angles_shape', 'sides_area_jac', 'excitable_dt',
-           'pre_optimize']
+           'excitable_dt_perim', 'excitable_dt_angles']
 
 # %% ../01_tension_time_evolution.ipynb 4
 import os
@@ -101,7 +101,22 @@ def excitable_dt(Ts, m=2):
     dT_dt -= area_jac * (area_jac@dT_dt)
     return dT_dt
 
-# %% ../01_tension_time_evolution.ipynb 28
+def excitable_dt_perim(Ts, m=2):
+    """Time derivative of tensions under excitable tension model with constrained perimeter"""
+    dT_dt = Ts**m
+    dT_dt -= dT_dt.sum()
+    return dT_dt
+
+# %% ../01_tension_time_evolution.ipynb 15
+def excitable_dt_angles(phi_is, m=2):
+    """Time derivative of angles under excitable tension model with constrained circumcircle"""
+    # convert to angles
+    Ti_rate = sin(phi_is)**(m-1)
+    second_term = (Ti_rate * tan(phi_is)).sum() / tan(phi_is).sum()
+    phi_is_dot = tan(phi_is) * (Ti_rate  - second_term)
+    return phi_is_dot
+
+# %% ../01_tension_time_evolution.ipynb 26
 @patch
 
 def get_angles(self: HalfEdgeMesh):
@@ -116,20 +131,20 @@ def get_angles(self: HalfEdgeMesh):
         while not returned:
             heids.append(he._heid)
             lengths.append(egde_lengths[he._heid])
-            he = self.hes[he.nxt]
+            he = he.nxt
             returned = (he == start_he)
         angles = sides_angles(lengths) 
         for heid, a in zip(heids, angles):
             angle_dict[heid] = a   
     return angle_dict
 
-# %% ../01_tension_time_evolution.ipynb 36
+# %% ../01_tension_time_evolution.ipynb 35
 import autograd.numpy as anp  # Thinly-wrapped numpy
-from autograd import grad
+from autograd import grad as agrad
 
 from scipy.sparse import csc_matrix
 
-# %% ../01_tension_time_evolution.ipynb 37
+# %% ../01_tension_time_evolution.ipynb 36
 @patch
 def vertices_to_initial_cond(self: HalfEdgeMesh):
     """Format vertices for use in energy minimization."""
@@ -145,7 +160,6 @@ def initial_cond_to_vertices(self: HalfEdgeMesh, x0):
     vertex_vector = np.stack([x, y], axis=1)
     return {key: val for key, val in zip(vertex_keys, vertex_vector)}
 
-
 @patch
 def get_energy_fct(self: HalfEdgeMesh):
     """Get energy function sum_edges (l_e -l_e,0)^2. remove translation mode by keeping COM fixed."""
@@ -154,20 +168,10 @@ def get_energy_fct(self: HalfEdgeMesh):
 
     # we will need to look up which vertex key corresponds to list position
     vertex_key_dict = {key: ix for ix, key in enumerate(sorted(self.vertices.keys()))}
-    #vertex_into_edge = np.zeros((int(len(self.hes)/2), len(self.vertices)))
-    #vertex_outo_edge = np.zeros((int(len(self.hes)/2), len(self.vertices)))
     for e in self.hes.values():
-        if e.vertices[0] < e.vertices[1]: # avoid duplicates
-            e_lst.append([vertex_key_dict[v] for v in e.vertices])
-            rest_lengths.append((e.rest+self.hes[e.twin].rest)/2)
-            #vertex_into_edge[len(e_lst)-1, vertex_key_dict[e.vertices[0]]] = 1
-            #vertex_outo_edge[len(e_lst)-1, vertex_key_dict[e.vertices[1]]] = 1
-    
-    #vertex_is_neighbor = vertex_in_edge_mat @ vertex_in_edge_mat.T
-    #np.fill_diagonal(vertex_is_neighbor, 0)
-    #vertex_in_edge = csc_matrix(vertex_into_edge+vertex_outo_edge)
-    #vertex_into_edge = csc_matrix(vertex_into_edge)
-    #vertex_outo_edge = csc_matrix(vertex_outo_edge)
+        if e.duplicate: # avoid duplicates
+            e_lst.append([vertex_key_dict[v._vid] for v in e.vertices])
+            rest_lengths.append((e.rest+e.twin.rest)/2)
 
     e_lst = anp.array(e_lst).T
     rest_lengths = anp.array(rest_lengths)
@@ -184,19 +188,23 @@ def get_energy_fct(self: HalfEdgeMesh):
         E = E + 1/2*((anp.mean(x)-center[0])**2+(anp.mean(y)-center[0]))**2
         return E
     
-    return get_E, grad(get_E)
+    return get_E, agrad(get_E)
 
-# %% ../01_tension_time_evolution.ipynb 49
-def pre_optimize(mesh, fact=.3, n_iter=1):
+# %% ../01_tension_time_evolution.ipynb 48
+@patch
+def pre_optimize(self: HalfEdgeMesh, fact=.3, n_iter=1):
     """Greedy pre-optimization"""
     for i in range(n_iter):
-        for he in mesh.hes.values():
-            if he._heid < he.twin:
-                rest = (he.rest+mesh.hes[he.twin].rest)/2
-                vec = mesh.vertices[he.vertices[1]].coords-mesh.vertices[he.vertices[0]].coords
+        for he in self.hes.values():
+            if he.duplicate:
+                rest = (he.rest+he.twin.rest)/2
+                vec = he.vertices[1].coords-he.vertices[0].coords
                 length = norm(vec)
                 delta = fact* vec/length * (length-rest)
-                mesh.vertices[he.vertices[0]].coords += delta/2
-                mesh.vertices[he.vertices[1]].coords -= delta/2
+                he.vertices[0].coords += delta/2
+                he.vertices[1].coords -= delta/2
                 
 # for reasons which are fucking beyong me, as a patched class method this is very slow??
+
+# %% ../01_tension_time_evolution.ipynb 67
+from copy import deepcopy
