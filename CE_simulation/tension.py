@@ -4,6 +4,9 @@
 __all__ = ['vectors_angle', 'sides_area', 'sides_circum', 'sides_angles', 'angles_shape', 'sides_area_jac', 'excitable_dt',
            'excitable_dt_perim', 'excitable_dt_angles', 'excitable_dt_post']
 
+# %% ../01_tension_time_evolution.ipynb 3
+from .triangle import *
+
 # %% ../01_tension_time_evolution.ipynb 4
 import os
 import numpy as np

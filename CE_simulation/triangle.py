@@ -236,6 +236,7 @@ class Face:
     """Attribute holder class for faces. Attributes point to other items."""
     _fid : int
     hes : List[HalfEdge]
+    dual_coords: Union[NDArray[Shape["2"],Float], None] = None
 
 # %% ../00_triangle_data_structure.ipynb 34
 @patch
