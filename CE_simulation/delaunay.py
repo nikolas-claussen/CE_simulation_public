@@ -2,7 +2,12 @@
 
 # %% auto 0
 __all__ = ['rot_mat', 'shear_mat', 'scale_mat', 'get_triangular_lattice_convex', 'get_triangular_lattice_convex_alt',
-           'get_tri_hemesh', 'get_double_angles', 'voronoi_plot_2d_bdry', 'get_circumcenter', 'get_voronoi_pos']
+           'get_tri_hemesh', 'get_double_angles', 'voronoi_plot_2d_bdry', 'get_inertia', 'get_circumcenter',
+           'get_voronoi_pos']
+
+# %% ../02_delaunay_simulation.ipynb 3
+from .triangle import *
+from .tension import *
 
 # %% ../02_delaunay_simulation.ipynb 4
 import os
@@ -108,9 +113,11 @@ def get_triangular_lattice_convex_alt(nx, ny, convexify=True):
     vals = halfplanes[1].dot(pts)
     in_0_row = vals[np.abs(pts[1]) < epsilon]    
     is_convex &= (vals > in_0_row.min()-epsilon) & (vals < in_0_row.max()+epsilon)
-
+    
     if convexify:
-        return pts[:, is_convex]
+        pts = pts[:, is_convex]
+        pts = (pts.T-pts.mean(axis=1)).T
+        return pts
     return pts
 
 def get_tri_hemesh(nx=7, ny=11, noise=0):
@@ -252,7 +259,18 @@ def voronoiplot(self: HalfEdgeMesh, **kw):
     
     voronoi_plot_2d_bdry(vor, bdry=bdry_vertices, show_vertices=False, show_points=False)
 
-# %% ../02_delaunay_simulation.ipynb 22
+# %% ../02_delaunay_simulation.ipynb 21
+def get_inertia(pts):
+    """Pts = (n_points, 2)"""
+    pts -= pts.mean(axis=0)
+    x, y = pts.T
+    Ixx = (x**2).mean()
+    Ixy = (x*y).mean()
+    Iyy = (y**2).mean()
+    return np.array([[Ixx, Ixy], [Ixy,Iyy]])
+    
+
+# %% ../02_delaunay_simulation.ipynb 31
 def get_circumcenter(a, b, c):
     """Return circumcircle radius and circumcenter"""
     b_, c_ = (b-a, c-a)
@@ -261,7 +279,7 @@ def get_circumcenter(a, b, c):
     r = norm(u_)
     return r, u_ + a
 
-# %% ../02_delaunay_simulation.ipynb 24
+# %% ../02_delaunay_simulation.ipynb 33
 def get_voronoi_pos(mesh):
     circumcenter_dict = {}
     for key, fc in mesh.faces.items():
@@ -280,7 +298,7 @@ def get_voronoi_pos(mesh):
 @patch
 def set_voronoi(self: HalfEdgeMesh):
     """Set dual positions to voronoi"""
-    for fc in mesh.faces.values():
+    for fc in self.faces.values():
         vecs = []
         returned = False
         start_he = fc.hes[0]

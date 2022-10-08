@@ -2,8 +2,8 @@
 
 # %% auto 0
 __all__ = ['flatten', 'sort_vertices', 'sort_ids_by_vertices', 'get_neighbors', 'ListOfVerticesAndFaces', 'get_test_mesh',
-           'HalfEdge', 'Vertex', 'Face', 'Edge', 'get_half_edges', 'HalfEdgeMesh', 'get_test_hemesh',
-           'get_test_mesh_large', 'get_test_hemesh_large']
+           'HalfEdge', 'Vertex', 'Face', 'get_half_edges', 'HalfEdgeMesh', 'get_test_hemesh', 'get_test_mesh_large',
+           'get_test_hemesh_large']
 
 # %% ../00_triangle_data_structure.ipynb 3
 import os
@@ -221,6 +221,19 @@ class HalfEdge:
         return [self._hemesh.vertices[v] for v in self._verticesid]
     def __post_init__(self):
         self.duplicate = self._verticesid[0] < self._verticesid[1]
+        
+    def __repr__(self):
+        repr_str = f"HalfEdge(heid={self._heid}, nxt={self._nxtid}, prev={self._previd}, twin={self._twinid}, "
+        if self._faceid is not None:
+            repr_str += f"face={self._faceid}, "
+        else:
+            repr_str += f"face=None, "
+        repr_str += f"vertices={self._verticesid}, "
+        repr_str += f"rest={round(self.rest, ndigits=1)}, passive={round(self.passive, ndigits=1)}"
+        if self._hemesh is not None:
+            repr_str += f", center={np.round(np.mean([v.coords  for v in self.vertices], axis=0), decimals=1)}"
+        return repr_str
+
     
 @dataclass
 class Vertex:
@@ -230,6 +243,14 @@ class Vertex:
     _vid : int
     coords : NDArray[Shape["2"], Float]
     incident : List[HalfEdge]
+    rest_shape: NDArray[Shape["2, 2"],Float] = np.array([[1.0, 0.0], [0.0, 1.0]])
+    
+    def __repr__(self):
+        repr_str = f"Vertex(vid={self._vid}, coords={np.round(self.coords, decimals=1)}, "
+        repr_str += f"rest_shape={[list(x) for x in np.round(self.rest_shape, decimals=1)]}, "
+        repr_str += f"hes={[he._heid for he in self.incident]})"
+        return repr_str
+        
 
 @dataclass
 class Face:
@@ -237,8 +258,15 @@ class Face:
     _fid : int
     hes : List[HalfEdge]
     dual_coords: Union[NDArray[Shape["2"],Float], None] = None
+    def __repr__(self):
+        repr_str = f"Face(fid={self._fid}, "
+        if self.dual_coords is not None:
+            repr_str += f"dual_coords={list(np.round(self.dual_coords, decimals=1))}, "
+        repr_str += f"hes={[he._heid for he in self.hes]})"
+        return repr_str
 
-# %% ../00_triangle_data_structure.ipynb 34
+
+# %% ../00_triangle_data_structure.ipynb 36
 @patch
 def sort_hes(self: Face):
     """Sort the list of hes of a face."""
@@ -255,19 +283,7 @@ def sort_hes(self: Face):
         returned = (he == start_he)
     self.hes = sorted_hes
 
-# %% ../00_triangle_data_structure.ipynb 35
-# obsolete?
-@dataclass
-class Edge:
-    """Attribute holder class for edges. Main point is to use it to store variables for ODE evolution"""
-    _eid : int
-    hes : Tuple[HalfEdge, HalfEdge]
-    variables : dict
-        
-    def __post_init__(self):
-        assert (self.hes[0].twin == self.hes[1]._heid) and (self.hes[1].twin == self.hes[0]._heid)
-
-# %% ../00_triangle_data_structure.ipynb 43
+# %% ../00_triangle_data_structure.ipynb 42
 def get_half_edges(mesh: ListOfVerticesAndFaces) -> Dict[int, HalfEdge]:
     """Create list of half-edges from a ListOfVerticesAndFaces mesh"""
     heid_counter = 0
@@ -306,7 +322,7 @@ def get_half_edges(mesh: ListOfVerticesAndFaces) -> Dict[int, HalfEdge]:
     # turn into dict for easy access
     return {he._heid: he for he in hes}
 
-# %% ../00_triangle_data_structure.ipynb 46
+# %% ../00_triangle_data_structure.ipynb 45
 class HalfEdgeMesh:
     def __init__(self, mesh : ListOfVerticesAndFaces):
         hes = get_half_edges(mesh)
@@ -338,7 +354,7 @@ class HalfEdgeMesh:
     def fromObj(fname):
         return HalfEdgeMesh(ListOfVerticesAndFaces.fromObj(fname))
 
-# %% ../00_triangle_data_structure.ipynb 47
+# %% ../00_triangle_data_structure.ipynb 46
 def get_test_hemesh():
     return HalfEdgeMesh(get_test_mesh())
 
