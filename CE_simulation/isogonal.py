@@ -2,14 +2,14 @@
 
 # %% auto 0
 __all__ = ['get_shape_tensor', 'get_triangle_shape_tensor', 'get_shape_energy', 'polygon_area', 'polygon_perimeter',
-           'rotate_about_center']
+           'get_vertex_energy', 'rotate_about_center']
 
-# %% ../03_real_shape_optimization.ipynb 3
+# %% ../03_real_shape_optimization.ipynb 4
 from .triangle import *
 from .tension import *
 from .delaunay import *
 
-# %% ../03_real_shape_optimization.ipynb 4
+# %% ../03_real_shape_optimization.ipynb 5
 import os
 import numpy as np
 import matplotlib.pyplot as plt
@@ -33,14 +33,14 @@ from copy import deepcopy
 
 from collections import Counter
 
-# %% ../03_real_shape_optimization.ipynb 5
+# %% ../03_real_shape_optimization.ipynb 6
 from dataclasses import dataclass
 from typing import Union, Dict, List, Tuple, Iterable, Callable
 from nptyping import NDArray, Int, Float, Shape
 
 from fastcore.foundation import patch
 
-# %% ../03_real_shape_optimization.ipynb 6
+# %% ../03_real_shape_optimization.ipynb 7
 import autograd.numpy as anp  # Thinly-wrapped numpy
 from autograd import grad as agrad
 
@@ -56,7 +56,6 @@ def get_shape_tensor(poly: NDArray[Shape["N, 2"], Float], metric=False):
     tensor = 2*anp.mean(anp.einsum("ei,ej->ije", edges, edges)/lengths, axis=-1)
     return tensor
 
-# %% ../03_real_shape_optimization.ipynb 14
 def get_triangle_shape_tensor(poly: NDArray[Shape["N, 2"], Float],):
     
     center = anp.mean(poly, axis=0)
@@ -66,8 +65,62 @@ def get_triangle_shape_tensor(poly: NDArray[Shape["N, 2"], Float],):
     orientations = signed_areas / anp.abs(signed_areas)
     triangle_edges = triangles - anp.roll(triangles, 1, axis=1)
     
-    tensor = anp.mean(anp.einsum("vei, vej->ijv", triangle_edges, triangle_edges)* orientations, axis=-1)
+    tensor = anp.mean(anp.einsum("vei, vej->ijv", triangle_edges, triangle_edges)*orientations, axis=-1)
     return 2/3*tensor
+
+def get_shape_energy(tensor, rest_shape=np.eye(2), mod_shear=0, mod_bulk=1):
+    delta = tensor-rest_shape
+    return mod_shear*anp.sum(delta**2)+mod_bulk*anp.trace(delta)**2
+
+# %% ../03_real_shape_optimization.ipynb 14
+def polygon_area(pts):
+    """area of polygon assuming no self-intersection. pts.shape (n_vertices, 2)"""
+    return anp.sum(pts[:,0]*anp.roll(pts[:,1], 1, axis=0) - anp.roll(pts[:,0], 1, axis=0)*pts[:,1])/2
+
+def polygon_perimeter(pts):
+    """perimeter of polygon assuming no self-intersection. pts.shape (n_vertices, 2)"""
+    return anp.sum(anp.linalg.norm(pts-anp.roll(pts, 1, axis=0), axis=1))
+
+def get_vertex_energy(pts, A0=1, P0=1, mod_shear=0, mod_bulk=1):
+    """Get vertex style energy"""
+    return mod_bulk*(polygon_area(pts)-A0)**2 + mod_shear*(polygon_perimeter(pts)-P0)**2
+
+# %% ../03_real_shape_optimization.ipynb 25
+# new plotting functions
+@patch
+def cellplot(self: HalfEdgeMesh, alpha=1):
+    """Plot based on primal positions. Might be slow because loops over faces"""
+    for fc in self.faces.values():
+        for he in fc.hes:
+            nghb = he.twin.face
+            if nghb is not None:
+                line = np.stack([fc.dual_coords, nghb.dual_coords])
+                plt.plot(*line.T, c="k", alpha=alpha)
+
+@patch
+def labelplot(self: HalfEdgeMesh, vertex_labels=True, face_labels=True,
+                     halfedge_labels=False, cell_labels=False):
+    """for debugging purposes, a fct to plot a trimesh with labels attached"""
+    if face_labels:
+        for fc in self.faces.values():
+            centroid = np.mean([he.vertices[0].coords for he in fc.hes], axis=0)
+            plt.text(*centroid, str(fc._fid), color="k")
+    if vertex_labels:
+        for v in self.vertices.values():
+            plt.text(*(v.coords+np.array([0,.05])), str(v._vid),
+                     color="tab:blue", ha="center")
+    if cell_labels:
+        for v in self.vertices.values():
+            nghbs = v.get_face_neighbors()
+            if not (None in nghbs):
+                center = np.mean([fc.dual_coords for fc in nghbs], axis=0)
+                plt.text(*(center), str(v._vid),
+                         color="tab:blue", ha="center")
+    if halfedge_labels:
+        for he in self.hes.values():
+            if he.duplicate:
+                centroid = np.mean([v.coords for v in he.vertices], axis=0)
+                plt.text(*centroid, str(he._heid), color="tab:orange")
 
 # %% ../03_real_shape_optimization.ipynb 26
 @patch
@@ -105,45 +158,7 @@ def transform_dual_vertices(self: HalfEdgeMesh, trafo: Union[Callable, NDArray[S
         else:
             fc.dual_coords = trafo.dot(fc.dual_coords)
 
-# %% ../03_real_shape_optimization.ipynb 27
-# new plotting functions
-
-@patch
-def cellplot(self: HalfEdgeMesh, alpha=1):
-    """Plot based on primal positions. Might be slow because loops over faces"""
-    for fc in self.faces.values():
-        for he in fc.hes:
-            nghb = he.twin.face
-            if nghb is not None:
-                line = np.stack([fc.dual_coords, nghb.dual_coords])
-                plt.plot(*line.T, c="k", alpha=alpha)
-
-@patch
-def labelplot(self: HalfEdgeMesh, vertex_labels=True, face_labels=True,
-                     halfedge_labels=False, cell_labels=False):
-    """for debugging purposes, a fct to plot a trimesh with labels attached"""
-    if face_labels:
-        for fc in self.faces.values():
-            centroid = np.mean([he.vertices[0].coords for he in fc.hes], axis=0)
-            plt.text(*centroid, str(fc._fid), color="k")
-    if vertex_labels:
-        for v in self.vertices.values():
-            plt.text(*(v.coords+np.array([0,.05])), str(v._vid),
-                     color="tab:blue", ha="center")
-    if cell_labels:
-        for v in self.vertices.values():
-            nghbs = v.get_face_neighbors()
-            if not (None in nghbs):
-                center = np.mean([fc.dual_coords for fc in nghbs], axis=0)
-                plt.text(*(center), str(v._vid),
-                         color="tab:blue", ha="center")
-    if halfedge_labels:
-        for he in self.hes.values():
-            if he.duplicate:
-                centroid = np.mean([v.coords for v in he.vertices], axis=0)
-                plt.text(*centroid, str(he._heid), color="tab:orange")
-
-# %% ../03_real_shape_optimization.ipynb 30
+# %% ../03_real_shape_optimization.ipynb 29
 @patch
 def get_shape_tensors(self: HalfEdgeMesh):
     """Get current shape tensors as dict"""
@@ -153,7 +168,7 @@ def get_shape_tensors(self: HalfEdgeMesh):
         neighbors = v.get_face_neighbors()
         if not (None in neighbors):
             polygon = np.stack([fc.dual_coords for fc in neighbors])
-            result_dict[v._vid] = get_shape_tensor(polygon, metric=True)
+            result_dict[v._vid] = get_triangle_shape_tensor(polygon)
         else: # leave at default value
             result_dict[v._vid] = np.eye(2)
     return result_dict
@@ -165,23 +180,23 @@ def set_rest_shapes(self: HalfEdgeMesh):
     for v in self.vertices.values():
         v.rest_shape = shape_dict[v._vid]
 
-# %% ../03_real_shape_optimization.ipynb 31
-def get_shape_energy(tensor, rest_shape=np.eye(2), mod_shear=0, mod_bulk=1):
-    delta = tensor-rest_shape
-    return mod_shear*np.trace(delta@delta)+mod_bulk*np.trace(delta)**2
-
+# %% ../03_real_shape_optimization.ipynb 30
 @patch
-def get_shape_energies(self: HalfEdgeMesh, mod_shear=0, mod_bulk=1):
-    """Does not set energy of boundary vertices"""
+def get_energies(self: HalfEdgeMesh, mod_shear=0, mod_bulk=1, A0=1, P0=1, energy="shape"):
+    """Does not set energy of boundary vertices. energy can be shape or vertex"""
     energy_dict = {}
     tensors = mesh.get_shape_tensors()
     for key, val in tensors.items():
         if not (None in self.vertices[key].get_face_neighbors()):
-            energy_dict[key] = get_shape_energy(val, rest_shape=mesh.vertices[key].rest_shape,
-                                                mod_shear=mod_shear, mod_bulk=mod_bulk)
+            if energy =="shape":
+                energy_dict[key] = get_shape_energy(val, rest_shape=mesh.vertices[key].rest_shape,
+                                                    mod_shear=mod_shear, mod_bulk=mod_bulk)
+            elif energy == "vertex":
+                pts = np.stack([fc.dual_coords for fc in self.vertices[key].get_face_neighbors()])
+                energy_dict[key] = get_vertex_energy(pts, A0=A0, P0=P0, mod_shear=mod_shear, mod_bulk=mod_bulk)
     return energy_dict
 
-# %% ../03_real_shape_optimization.ipynb 50
+# %% ../03_real_shape_optimization.ipynb 32
 @patch
 def dual_vertices_to_initial_cond(self: HalfEdgeMesh):
     """Format dual vertices for use in energy minimization."""
@@ -198,21 +213,7 @@ def initial_cond_to_dual_vertices(self: HalfEdgeMesh, x0):
     return {key: val for key, val in zip(face_keys, dual_vertex_vector)}
 
 
-# %% ../03_real_shape_optimization.ipynb 65
-#try to replace shape tensor based energy by simple area
-# to do 1: get area of polygon (using triangle decomposition)
-# to do 2: handle case of self-intersection (bow-tie) correcrly - bow tie should decrease area!
-
-def polygon_area(pts):
-    """area of polygon assuming no self-intersection. pts.shape (n_vertices, 2)"""
-    return anp.sum(pts[:,0]*anp.roll(pts[:,1], 1, axis=0) - anp.roll(pts[:,0], 1, axis=0)*pts[:,1])/2
-
-def polygon_perimeter(pts):
-    """perimeter of polygon assuming no self-intersection. pts.shape (n_vertices, 2)"""
-    return anp.sum(anp.linalg.norm(pts-anp.roll(pts, 1, axis=0), axis=1))
-
-
-# %% ../03_real_shape_optimization.ipynb 69
+# %% ../03_real_shape_optimization.ipynb 37
 @patch
 def get_angle_deviation(self: HalfEdgeMesh):
     """Angle between primal and dual edges. For diagnostics"""
@@ -227,9 +228,10 @@ def get_angle_deviation(self: HalfEdgeMesh):
             angle_deviation[he._heid] = np.dot(dual_edge, primal_edge)**2
     return angle_deviation
 
-# %% ../03_real_shape_optimization.ipynb 74
+# %% ../03_real_shape_optimization.ipynb 40
 @patch
-def get_primal_energy_fct(self: HalfEdgeMesh, A0=1, P0=6, mod_bulk=1, mod_shear=1e-3, angle_penalty=1e2):
+def get_primal_energy_fct(self: HalfEdgeMesh, mod_bulk=1, mod_shear=1e-3, angle_penalty=1e2,
+                          A0=1, P0=6, energy="shape"):
     """Get function to compute primal energy from primal vertices."""
     
     # stuff for the shape tensor energy
@@ -265,7 +267,7 @@ def get_primal_energy_fct(self: HalfEdgeMesh, A0=1, P0=6, mod_bulk=1, mod_shear=
 
     def get_E(x0):
         x, y = (x0[:n_faces], x0[n_faces:])
-        # shape energy
+        # shape energy - can be either vertex style or shape tensor based
         #tensors = []
         E_shape = 0
         for fc in primal_face_list:
@@ -288,7 +290,7 @@ def get_primal_energy_fct(self: HalfEdgeMesh, A0=1, P0=6, mod_bulk=1, mod_shear=
     
     return get_E, agrad(get_E)
 
-# %% ../03_real_shape_optimization.ipynb 96
+# %% ../03_real_shape_optimization.ipynb 55
 @patch
 def get_primal_edge_lens(self: HalfEdgeMesh):
     return {he._heid: np.linalg.norm(he.face.dual_coords-he.twin.face.dual_coords)
@@ -296,21 +298,8 @@ def get_primal_edge_lens(self: HalfEdgeMesh):
     
     return None
 
-# %% ../03_real_shape_optimization.ipynb 97
+# %% ../03_real_shape_optimization.ipynb 56
 def rotate_about_center(x, angle=pi/2):
     """Rotate pts about center. x.shape = (n_pts, 2)"""
     center = np.mean(x, axis=0)
     return (x-center)@rot_mat(angle)+np.mean(x, axis=0)
-
-# %% ../03_real_shape_optimization.ipynb 137
-# for debugging purposes, a fct to plot a trimesh with labels attached
-
-meshes[34].cellplot(alpha=.25)
-meshes[34].triplot()
-meshes[34].labelplot()
-
-
-plt.xlim([-3, 3])
-plt.ylim([-2, 2])
-plt.gca().set_aspect("equal", adjustable="box");
-
