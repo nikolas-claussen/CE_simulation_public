@@ -13,6 +13,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib as mpl
+from matplotlib.collections import LineCollection
 
 from numpy import sin, cos, tan, pi, sqrt, arccos, arctan, arctan2
 from numpy.linalg import norm
@@ -48,14 +49,14 @@ from scipy.sparse import csc_matrix
 # %% ../03_real_shape_optimization.ipynb 10
 import ipywidgets as widgets
 
-# %% ../03_real_shape_optimization.ipynb 17
+# %% ../03_real_shape_optimization.ipynb 15
 from matplotlib import animation, rc
 rc('animation', html='html5')
 
-# %% ../03_real_shape_optimization.ipynb 30
+# %% ../03_real_shape_optimization.ipynb 21
 def polygon_area(pts):
     """area of polygon assuming no self-intersection. pts.shape (n_vertices, 2)"""
-    return anp.sum(pts[:,0]*anp.roll(pts[:,1], 1, axis=0) - anp.roll(pts[:,0], 1, axis=0)*pts[:,1])/2
+    return anp.sum(pts[:,0]*anp.roll(pts[:,1], 1, axis=0) - anp.roll(pts[:,0], 1, axis=0)*pts[:,1], axis=0)/2
 
 def polygon_perimeter(pts):
     """perimeter of polygon assuming no self-intersection. pts.shape (n_vertices, 2)"""
@@ -65,18 +66,8 @@ def get_vertex_energy(pts, A0=1, P0=1, mod_shear=0, mod_bulk=1):
     """Get vertex style energy"""
     return mod_bulk*(polygon_area(pts)-A0)**2 + mod_shear*(polygon_perimeter(pts)-P0)**2
 
-# %% ../03_real_shape_optimization.ipynb 32
+# %% ../03_real_shape_optimization.ipynb 27
 # new plotting functions
-@patch
-def cellplot(self: HalfEdgeMesh, alpha=1):
-    """Plot based on primal positions. Might be slow because loops over faces"""
-    for fc in self.faces.values():
-        for he in fc.hes:
-            nghb = he.twin.face
-            if nghb is not None:
-                line = np.stack([fc.dual_coords, nghb.dual_coords])
-                plt.plot(*line.T, c="k", alpha=alpha)
-
 @patch
 def labelplot(self: HalfEdgeMesh, vertex_labels=True, face_labels=True,
                      halfedge_labels=False, cell_labels=False):
@@ -102,7 +93,31 @@ def labelplot(self: HalfEdgeMesh, vertex_labels=True, face_labels=True,
                 centroid = np.mean([v.coords for v in he.vertices], axis=0)
                 plt.text(*centroid, str(he._heid), color="tab:orange")
 
-# %% ../03_real_shape_optimization.ipynb 33
+# %% ../03_real_shape_optimization.ipynb 28
+@patch
+def cellplot(self: HalfEdgeMesh, alpha=1, set_lims=False):
+    """Plot based on primal positions. Now fast because of use of LineCollection"""
+    face_keys = sorted(self.faces.keys())
+    face_key_dict = {key: ix for ix, key in enumerate(face_keys)}
+    face_key_dict[None] = None
+    primal_face_list = []
+    for v in self.vertices.values():
+        neighbors = v.get_face_neighbors()
+        if not (None in neighbors):
+            face = [face_key_dict[fc._fid] for fc in neighbors]
+            face.append(face[0])
+            primal_face_list.append(face)
+
+    pts = np.stack([self.faces[key].dual_coords for key in face_keys])
+    lines = [[pts[v] for v in fc] for fc in primal_face_list]
+    
+    #fig, ax = plt.subplots()
+    plt.gca().add_collection(LineCollection(lines, color="k", alpha=alpha))
+    if set_lims:
+        plt.gca().set_xlim([pts[:,0].min(), pts[:,0].max()])
+        plt.gca().set_ylim([pts[:,1].min(), pts[:,1].max()])
+
+# %% ../03_real_shape_optimization.ipynb 29
 @patch
 def get_face_neighbors(self: Vertex):
     """Get face neighbors of vertex"""
@@ -138,7 +153,7 @@ def transform_dual_vertices(self: HalfEdgeMesh, trafo: Union[Callable, NDArray[S
         else:
             fc.dual_coords = trafo.dot(fc.dual_coords)
 
-# %% ../03_real_shape_optimization.ipynb 35
+# %% ../03_real_shape_optimization.ipynb 31
 @patch
 def dual_vertices_to_initial_cond(self: HalfEdgeMesh):
     """Format dual vertices for use in energy minimization."""
@@ -155,7 +170,7 @@ def initial_cond_to_dual_vertices(self: HalfEdgeMesh, x0):
     return {key: val for key, val in zip(face_keys, dual_vertex_vector)}
 
 
-# %% ../03_real_shape_optimization.ipynb 37
+# %% ../03_real_shape_optimization.ipynb 33
 @patch
 def get_angle_deviation(self: HalfEdgeMesh):
     """Angle between primal and dual edges. For diagnostics"""
@@ -170,14 +185,126 @@ def get_angle_deviation(self: HalfEdgeMesh):
             angle_deviation[he._heid] = np.dot(dual_edge, primal_edge)**2
     return angle_deviation
 
-# %% ../03_real_shape_optimization.ipynb 42
+# %% ../03_real_shape_optimization.ipynb 39
 @patch
 def is_bdr(self: Face):
     """True if face touches bdr. Check all vertices. Does any have an incident edge with None face?"""
     verts = [he.vertices[1] for he in self.hes]
     return any([any([he.face is None for he in v.incident]) for v in verts])
 
-# %% ../03_real_shape_optimization.ipynb 46
+# %% ../03_real_shape_optimization.ipynb 42
+@patch
+def get_primal_energy_fct_vertices(self: HalfEdgeMesh, mod_bulk=1, mod_shear=1e-3, angle_penalty=1e2,
+                                   rest_shape=None, reg_bulk=0, A0=sqrt(3)/2,
+                                   max_valence=10,):
+    """Get function to compute primal energy from primal vertices."""
+    if rest_shape is None:
+        rest_shape = np.eye(2) if metric else 2*np.eye(2)
+
+    # stuff for the shape tensor energy
+    face_list = []    
+    face_key_dict = {key: ix for ix, key in enumerate(sorted(self.faces.keys()))}
+    face_key_dict[None] = None
+    for fc in self.faces.values():
+        neighbors = [he.twin.face for he in fc.hes]
+        if not (None in neighbors):
+            face_list.append(anp.array([face_key_dict[x._fid] for x in neighbors]
+                                      +[face_key_dict[fc._fid]]))
+    face_list = anp.array(face_list).T
+    n_faces = len(self.faces)
+
+    # stuff for the vertex-energy-based regularization
+    cell_list = []
+    for v in self.vertices.values():    # iterate around vertex.
+        neighbors = v.get_face_neighbors()
+        if not (None in neighbors):
+            cell = [face_key_dict[fc._fid] for fc in neighbors]
+            try:
+                cell = anp.pad(cell, (0, max_valence-len(cell)), mode="edge")
+            except ValueError:
+                print(f"celll with more than {max_valence} nghbs, increase max_valence")
+            cell_list.append(cell)
+    cell_list = anp.array(cell_list)
+    
+    # stuff for the angle penalty
+    e_dual = [] # dual vertices do not move during optimization, so collect the actual edges
+    e_lst_primal = [] # for primal, collect the indices
+
+    for he in self.hes.values():
+        if (he.face is not None) and (he.twin.face is not None) and he.duplicate:
+            dual_edge = he.vertices[1].coords-he.vertices[0].coords
+            dual_edge = dual_edge / np.linalg.norm(dual_edge)
+            primal_edge = [face_key_dict[fc._fid] for fc in [he.face, he.twin.face]]
+            e_dual.append(dual_edge)
+            e_lst_primal.append(primal_edge)
+    e_dual = anp.array(e_dual)
+    e_lst_primal = anp.array(e_lst_primal)
+    
+    # breaking translational invariance.
+    center = anp.mean([v.coords for v in self.vertices.values()], axis=0)
+    
+    def get_E(x0):
+        x, y = (x0[:n_faces], x0[n_faces:])
+        pts = anp.stack([x, y], axis=-1)
+        # shape energy - can be either vertex style or shape tensor based
+        edges = anp.stack([pts[a]-pts[face_list[3]] for a in face_list[:3]])
+        lengths = anp.linalg.norm(edges, axis=-1)
+        units = (edges.T/lengths.T).T        
+        tensors = 2*anp.einsum('efi,efj->fij', edges, units) - rest_shape
+        E_shape = (mod_shear*anp.sum(tensors**2)
+                   + mod_bulk*anp.sum((tensors[:,0,0]+tensors[:,1,1])**2))
+        # regularize with the vertex model energy
+        poly = anp.stack([[x[i], y[i]] for i in cell_list.T]) # shape (max_valence, 2, n_cells)
+        E_vertex = reg_bulk*anp.sum((polygon_area(poly)-A0)**2)
+        # angle penalty
+        e_primal = pts[e_lst_primal[:,1]] - pts[e_lst_primal[:,0]]
+        e_primal = (e_primal.T/anp.linalg.norm(e_primal, axis=-1)).T
+        E_angle = angle_penalty * anp.mean(anp.einsum('ei,ei->e', e_primal, e_dual)**2)
+        # break translation symmetry
+        E_trans = 1/2*((anp.mean(x)-center[0])**2+(anp.mean(y)-center[0]))**2
+        
+        return  E_angle + E_shape + E_vertex + E_trans
+    
+    return get_E, agrad(get_E)
+
+# %% ../03_real_shape_optimization.ipynb 55
+@patch
+def get_primal_edge_lens(self: HalfEdgeMesh, oriented=True):
+    len_dict = {}
+    for he in self.hes.values():
+        if (he.face is not None) and (he.twin.face is not None) and he.duplicate:
+            primal_vec = he.face.dual_coords-he.twin.face.dual_coords
+            length = np.linalg.norm(primal_vec)
+            if oriented:
+                centroid_vec = (np.mean([x.vertices[0].coords for x in he.face.hes], axis=0)
+                                -np.mean([x.vertices[0].coords for x in he.twin.face.hes], axis=0))
+                length *= np.sign(np.dot(primal_vec, centroid_vec))
+            len_dict[he._heid] = length
+    return len_dict
+
+# %% ../03_real_shape_optimization.ipynb 59
+# for re-setting primal vertex positions after intercalation
+def rotate_about_center(x, angle=pi/2):
+    """Rotate pts about center. x.shape = (n_pts, 2)"""
+    center = np.mean(x, axis=0)
+    return (x-center)@rot_mat(angle)+np.mean(x, axis=0)
+
+# %% ../03_real_shape_optimization.ipynb 60
+@patch
+def flatten_triangulation(self: HalfEdgeMesh, tol=1e-3):
+    """flatten triangulation"""
+    get_E, grd = self.get_energy_fct()
+    x0 = self.vertices_to_initial_cond()
+    sol = optimize.minimize(get_E, x0, method="CG", jac=grd, tol=tol)
+    if sol["status"] !=0:
+        print("Triangulation optimization failed")
+        print(sol["message"])
+    new_coord_dict = self.initial_cond_to_vertices(sol["x"])
+    for key, val in self.vertices.items():
+        val.coords = new_coord_dict[key]
+    self.set_rest_lengths()
+
+# %% ../03_real_shape_optimization.ipynb 79
 @patch
 def get_primal_energy_fct_vertices(self: HalfEdgeMesh, mod_bulk=1, mod_shear=1e-3, angle_penalty=1e2,
                                    metric=False, oriented=False, rest_shape=None,
@@ -253,6 +380,7 @@ def get_primal_energy_fct_vertices(self: HalfEdgeMesh, mod_bulk=1, mod_shear=1e-
                    + mod_bulk*anp.sum((tensors[:,0,0]+tensors[:,1,1])**2))
         
         # regularize with the vertex model energy
+        #"""
         E_vertex = 0
         if regularization == "per-cell":
             if reg_bulk > 0 or reg_shear > 0:
@@ -264,6 +392,7 @@ def get_primal_energy_fct_vertices(self: HalfEdgeMesh, mod_bulk=1, mod_shear=1e-
             poly = anp.stack([x[bdry_faces], y[bdry_faces]], axis=-1)
             area = polygon_area(poly)
             E_vertex = reg_bulk*(area-len(cell_list)*A0)**2
+        #"""
         # angle penalty
         e_primal = pts[e_lst_primal[:,1]] - pts[e_lst_primal[:,0]]
         e_primal = (e_primal.T/anp.linalg.norm(e_primal, axis=-1)).T
@@ -274,34 +403,3 @@ def get_primal_energy_fct_vertices(self: HalfEdgeMesh, mod_bulk=1, mod_shear=1e-
         return E_shape + E_angle + E_vertex #+ E_trans
     
     return get_E, agrad(get_E)
-
-# %% ../03_real_shape_optimization.ipynb 53
-@patch
-def get_primal_edge_lens(self: HalfEdgeMesh):
-    return {he._heid: np.linalg.norm(he.face.dual_coords-he.twin.face.dual_coords)
-            for key, he in self.hes.items()
-            if (he.face is not None) and (he.twin.face is not None) and he.duplicate} 
-    
-    return None
-
-# %% ../03_real_shape_optimization.ipynb 56
-# for re-setting primal vertex positions after intercalation
-def rotate_about_center(x, angle=pi/2):
-    """Rotate pts about center. x.shape = (n_pts, 2)"""
-    center = np.mean(x, axis=0)
-    return (x-center)@rot_mat(angle)+np.mean(x, axis=0)
-
-# %% ../03_real_shape_optimization.ipynb 58
-@patch
-def flatten_triangulation(self: HalfEdgeMesh, tol=1e-3):
-    """flatten triangulation"""
-    get_E, grd = self.get_energy_fct()
-    x0 = self.vertices_to_initial_cond()
-    sol = optimize.minimize(get_E, x0, method="CG", jac=grd, tol=tol)
-    if sol["status"] !=0:
-        print("Triangulation optimization failed")
-        print(sol["message"])
-    new_coord_dict = self.initial_cond_to_vertices(sol["x"])
-    for key, val in self.vertices.items():
-        val.coords = new_coord_dict[key]
-    self.set_rest_lengths()
