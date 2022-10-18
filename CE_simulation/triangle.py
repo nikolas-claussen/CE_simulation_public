@@ -3,13 +3,14 @@
 # %% auto 0
 __all__ = ['flatten', 'sort_vertices', 'sort_ids_by_vertices', 'get_neighbors', 'ListOfVerticesAndFaces', 'get_test_mesh',
            'HalfEdge', 'Vertex', 'Face', 'get_half_edges', 'HalfEdgeMesh', 'get_test_hemesh', 'get_test_mesh_large',
-           'get_test_hemesh_large']
+           'get_test_hemesh_large', 'get_boundary_faces']
 
 # %% ../00_triangle_data_structure.ipynb 3
 import os
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib as mpl
+from matplotlib.collections import LineCollection
 
 from scipy import spatial
 
@@ -18,7 +19,7 @@ from collections import defaultdict
 
 # %% ../00_triangle_data_structure.ipynb 5
 from dataclasses import dataclass
-from typing import Union, Dict, List, Tuple, Iterable
+from typing import Union, Dict, List, Tuple, Iterable, Callable
 from nptyping import NDArray, Int, Float, Shape
 
 from fastcore.foundation import patch
@@ -243,11 +244,9 @@ class Vertex:
     _vid : int
     coords : NDArray[Shape["2"], Float]
     incident : List[HalfEdge]
-    rest_shape: NDArray[Shape["2, 2"],Float] = np.array([[1.0, 0.0], [0.0, 1.0]])
     
     def __repr__(self):
         repr_str = f"Vertex(vid={self._vid}, coords={np.round(self.coords, decimals=1)}, "
-        repr_str += f"rest_shape={[list(x) for x in np.round(self.rest_shape, decimals=1)]}, "
         repr_str += f"hes={[he._heid for he in self.incident]})"
         return repr_str
         
@@ -258,10 +257,12 @@ class Face:
     _fid : int
     hes : List[HalfEdge]
     dual_coords: Union[NDArray[Shape["2"],Float], None] = None
+    rest_shape: NDArray[Shape["2, 2"],Float] = np.array([[1.0, 0.0], [0.0, 1.0]])
     def __repr__(self):
         repr_str = f"Face(fid={self._fid}, "
         if self.dual_coords is not None:
             repr_str += f"dual_coords={list(np.round(self.dual_coords, decimals=1))}, "
+        repr_str += f"rest_shape={[list(x) for x in np.round(self.rest_shape, decimals=1)]}, "
         repr_str += f"hes={[he._heid for he in self.hes]})"
         return repr_str
 
@@ -283,7 +284,7 @@ def sort_hes(self: Face):
         returned = (he == start_he)
     self.hes = sorted_hes
 
-# %% ../00_triangle_data_structure.ipynb 42
+# %% ../00_triangle_data_structure.ipynb 41
 def get_half_edges(mesh: ListOfVerticesAndFaces) -> Dict[int, HalfEdge]:
     """Create list of half-edges from a ListOfVerticesAndFaces mesh"""
     heid_counter = 0
@@ -322,7 +323,7 @@ def get_half_edges(mesh: ListOfVerticesAndFaces) -> Dict[int, HalfEdge]:
     # turn into dict for easy access
     return {he._heid: he for he in hes}
 
-# %% ../00_triangle_data_structure.ipynb 45
+# %% ../00_triangle_data_structure.ipynb 44
 class HalfEdgeMesh:
     def __init__(self, mesh : ListOfVerticesAndFaces):
         hes = get_half_edges(mesh)
@@ -354,11 +355,11 @@ class HalfEdgeMesh:
     def fromObj(fname):
         return HalfEdgeMesh(ListOfVerticesAndFaces.fromObj(fname))
 
-# %% ../00_triangle_data_structure.ipynb 46
+# %% ../00_triangle_data_structure.ipynb 45
 def get_test_hemesh():
     return HalfEdgeMesh(get_test_mesh())
 
-# %% ../00_triangle_data_structure.ipynb 59
+# %% ../00_triangle_data_structure.ipynb 58
 def get_test_mesh_large(x=np.linspace(0, 1, 25), y=np.linspace(0, 1, 50), noise=.0025):
     pts = np.stack(np.meshgrid(x, y))
     
@@ -375,7 +376,7 @@ def get_test_mesh_large(x=np.linspace(0, 1, 25), y=np.linspace(0, 1, 50), noise=
 def get_test_hemesh_large(x=np.linspace(0, 1, 25), y=np.linspace(0, 1, 50), noise=.0025):
     return HalfEdgeMesh(get_test_mesh_large(x=x, y=y, noise=noise))
 
-# %% ../00_triangle_data_structure.ipynb 66
+# %% ../00_triangle_data_structure.ipynb 65
 @patch
 def reset_hes(self: HalfEdgeMesh, face_or_vertex: Union[Face, Vertex]):
     """Re-create the full list of half edges belonging to a face or vertex based on its first half edge.
@@ -400,7 +401,7 @@ def reset_hes(self: HalfEdgeMesh, face_or_vertex: Union[Face, Vertex]):
             returned = (he == start_he)
         face_or_vertex.incident = new_hes
 
-# %% ../00_triangle_data_structure.ipynb 70
+# %% ../00_triangle_data_structure.ipynb 69
 @patch
 def flip_edge(self: HalfEdgeMesh, e: int):
     """Flip edge of a triangle mesh. Call by using he index
@@ -453,7 +454,7 @@ def flip_edge(self: HalfEdgeMesh, e: int):
     
         
 
-# %% ../00_triangle_data_structure.ipynb 82
+# %% ../00_triangle_data_structure.ipynb 81
 @patch
 def is_consistent(self: HalfEdgeMesh):
     """For debugging/testing purposes"""
@@ -480,19 +481,131 @@ def is_consistent(self: HalfEdgeMesh):
 
 # %% ../00_triangle_data_structure.ipynb 87
 @patch
+def is_bdr(self: Face):
+    """True if face touches bdr. Check all vertices. Does any have an incident edge with None face?"""
+    verts = [he.vertices[1] for he in self.hes]
+    return any([any([he.face is None for he in v.incident]) for v in verts])
+
+def get_boundary_faces(msh):
+    """Get indices of boundary faces"""
+    bdr_faces = []
+    bdr_start = next(he for he in msh.hes.values() if he.face is None).twin.nxt
+    he = bdr_start
+    returned = False
+    while not returned:
+        bdr_faces.append(he.face._fid)
+        if he.nxt.twin.face.is_bdr():
+            he = he.nxt.twin
+        else:
+            he = he.prev.twin
+        returned = (he == bdr_start)
+    return bdr_faces
+
+# %% ../00_triangle_data_structure.ipynb 88
+@patch
+def get_face_neighbors(self: Vertex):
+    """Get face neighbors of vertex"""
+    neighbors = []
+    start_he = self.incident[0]
+    he = start_he
+    returned = False
+    while not returned:
+        neighbors.append(he.face)
+        he = he.nxt.twin
+        returned = (he == start_he)
+    return neighbors
+
+
+# %% ../00_triangle_data_structure.ipynb 90
+@patch
+def set_centroid(self: HalfEdgeMesh):
+    """Set dual positions to triangle centroid"""
+    for fc in self.faces.values():
+        vecs = []
+        returned = False
+        start_he = fc.hes[0]
+        he = start_he
+        while not returned:
+            vecs.append(he.vertices[0].coords)
+            he = he.nxt
+            returned = (he == start_he)
+        fc.dual_coords = np.mean(vecs, axis=0)
+
+# %% ../00_triangle_data_structure.ipynb 92
+@patch
+def transform_vertices(self: HalfEdgeMesh, trafo: Union[Callable, NDArray[Shape["2, 2"], Float]]):
+    for v in self.vertices.values():
+        if isinstance(trafo, Callable):
+            v.coords = trafo(v.coords)
+        else:
+            v.coords = trafo.dot(v.coords)
+            
+@patch
+def transform_dual_vertices(self: HalfEdgeMesh, trafo: Union[Callable, NDArray[Shape["2, 2"], Float]]):
+    for fc in self.faces.values():
+        if isinstance(trafo, Callable):
+            fc.dual_coords = trafo(fc.dual_coords)
+        else:
+            fc.dual_coords = trafo.dot(fc.dual_coords)
+
+# %% ../00_triangle_data_structure.ipynb 94
+@patch
 def triplot(self: HalfEdgeMesh):
     """wraps plt.triplot"""
     list_format = self.to_ListOfVerticesAndFaces()
     fcs = np.array(list(list_format.faces.values()))
     pts = np.array(list(list_format.vertices.values())).T
     plt.triplot(pts[0], pts[1], fcs)
-
-# %% ../00_triangle_data_structure.ipynb 91
+    
 @patch
-def get_edge_vecs(self: HalfEdgeMesh):
-    return {key: val.vertices[1].coords-val.vertices[0].coords
-            for key, val in self.hes.items()}
+def labelplot(self: HalfEdgeMesh, vertex_labels=True, face_labels=True,
+                     halfedge_labels=False, cell_labels=False):
+    """for debugging purposes, a fct to plot a trimesh with labels attached"""
+    if face_labels:
+        for fc in self.faces.values():
+            centroid = np.mean([he.vertices[0].coords for he in fc.hes], axis=0)
+            plt.text(*centroid, str(fc._fid), color="k")
+    if vertex_labels:
+        for v in self.vertices.values():
+            plt.text(*(v.coords+np.array([0,.05])), str(v._vid),
+                     color="tab:blue", ha="center")
+    if cell_labels:
+        for v in self.vertices.values():
+            nghbs = v.get_face_neighbors()
+            if not (None in nghbs):
+                center = np.mean([fc.dual_coords for fc in nghbs], axis=0)
+                plt.text(*(center), str(v._vid),
+                         color="tab:blue", ha="center")
+    if halfedge_labels:
+        for he in self.hes.values():
+            if he.duplicate:
+                centroid = np.mean([v.coords for v in he.vertices], axis=0)
+                plt.text(*centroid, str(he._heid), color="tab:orange")
+                
+@patch
+def cellplot(self: HalfEdgeMesh, alpha=1, set_lims=False):
+    """Plot based on primal positions. Now fast because of use of LineCollection"""
+    face_keys = sorted(self.faces.keys())
+    face_key_dict = {key: ix for ix, key in enumerate(face_keys)}
+    face_key_dict[None] = None
+    primal_face_list = []
+    for v in self.vertices.values():
+        neighbors = v.get_face_neighbors()
+        if not (None in neighbors):
+            face = [face_key_dict[fc._fid] for fc in neighbors]
+            face.append(face[0])
+            primal_face_list.append(face)
 
+    pts = np.stack([self.faces[key].dual_coords for key in face_keys])
+    lines = [[pts[v] for v in fc] for fc in primal_face_list]
+    
+    #fig, ax = plt.subplots()
+    plt.gca().add_collection(LineCollection(lines, color="k", alpha=alpha))
+    if set_lims:
+        plt.gca().set_xlim([pts[:,0].min(), pts[:,0].max()])
+        plt.gca().set_ylim([pts[:,1].min(), pts[:,1].max()])
+
+# %% ../00_triangle_data_structure.ipynb 99
 @patch
 def get_edge_lens(self: HalfEdgeMesh):
     return {key: np.linalg.norm(val.vertices[1].coords-val.vertices[0].coords)
@@ -502,3 +615,17 @@ def get_edge_lens(self: HalfEdgeMesh):
 def set_rest_lengths(self: HalfEdgeMesh):
     for key, val in self.get_edge_lens().items():
         self.hes[key].rest = val
+        
+@patch
+def get_rel_tension(self: HalfEdgeMesh):
+    rel_tensions = {}
+    for he in self.hes.values():
+        surrounding = []
+        if he.duplicate and he.face is not None:
+            surrounding.append(he.nxt.rest)
+            surrounding.append(he.prev.rest)
+            twin = he.twin
+            surrounding.append(twin.nxt.rest)
+            surrounding.append(twin.prev.rest)
+            rel_tensions[he._heid], rel_tensions[twin._heid] = 2*(4*he.rest/sum(surrounding),)
+    return rel_tensions

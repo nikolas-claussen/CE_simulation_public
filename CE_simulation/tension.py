@@ -2,7 +2,7 @@
 
 # %% auto 0
 __all__ = ['vectors_angle', 'sides_area', 'sides_circum', 'sides_angles', 'angles_shape', 'sides_area_jac', 'excitable_dt',
-           'excitable_dt_perim', 'excitable_dt_angles', 'excitable_dt_post']
+           'excitable_dt_post']
 
 # %% ../01_tension_time_evolution.ipynb 3
 from .triangle import *
@@ -24,6 +24,7 @@ from scipy import optimize
 from tqdm.notebook import tqdm
 
 import sys
+from copy import deepcopy
 
 # %% ../01_tension_time_evolution.ipynb 5
 from dataclasses import dataclass
@@ -83,19 +84,18 @@ def angles_shape(phis):
 def sides_area_jac(Ts):
     """get jacobian of area change in edge length"""
     dA = np.array([0., 0., 0.])
-    #inds = np.argsort(-Ts, axis=0)
-    #Ts = np.take_along_axis(Ts, inds, axis=0)
     dA += np.array([1, 1, 1])   * (Ts[2]-(Ts[0]-Ts[1])) * (Ts[2]+(Ts[0]-Ts[1])) * (Ts[0]+(Ts[1]-Ts[2]))
     dA += (Ts[0]+(Ts[1]+Ts[2])) * np.array([-1, 1, 1])  * (Ts[2]+(Ts[0]-Ts[1])) * (Ts[0]+(Ts[1]-Ts[2]))
     dA += (Ts[0]+(Ts[1]+Ts[2])) * (Ts[2]-(Ts[0]-Ts[1])) * np.array([1, -1, 1])  * (Ts[0]+(Ts[1]-Ts[2]))
     dA += (Ts[0]+(Ts[1]+Ts[2])) * (Ts[2]-(Ts[0]-Ts[1])) * (Ts[2]+(Ts[0]-Ts[1])) * np.array([1, 1, -1])
 
     dA /= 48*(sides_area(Ts)+1e-5)
-    #dA = np.take_along_axis(dA, inds, axis=0)
     return dA
 
 # %% ../01_tension_time_evolution.ipynb 13
 # tension time evolution in triangle with constrained area
+# perimeter and circumcircle constraints work poorly
+
 def excitable_dt(Ts, m=2):
     """Time derivative of tensions under excitable tension model with constrained area"""
     dT_dt = Ts**m
@@ -104,27 +104,11 @@ def excitable_dt(Ts, m=2):
     dT_dt -= area_jac * (area_jac@dT_dt)
     return dT_dt
 
-def excitable_dt_perim(Ts, m=2):
-    """Time derivative of tensions under excitable tension model with constrained perimeter"""
-    dT_dt = Ts**m
-    dT_dt -= dT_dt.sum()
-    return dT_dt
-
-# %% ../01_tension_time_evolution.ipynb 15
-def excitable_dt_angles(phi_is, m=2):
-    """Time derivative of angles under excitable tension model with constrained circumcircle"""
-    # convert to angles
-    Ti_rate = sin(phi_is)**(m-1)
-    second_term = (Ti_rate * tan(phi_is)).sum() / tan(phi_is).sum()
-    phi_is_dot = tan(phi_is) * (Ti_rate  - second_term)
-    return phi_is_dot
-
-# %% ../01_tension_time_evolution.ipynb 26
+# %% ../01_tension_time_evolution.ipynb 24
 @patch
-
 def get_angles(self: HalfEdgeMesh):
     angle_dict = {}
-    egde_lengths = {key: norm(val) for key, val in self.get_edge_vecs().items()}
+    egde_lengths = self.get_edge_lens()
     for fc in self.faces.values():
         lengths = []
         heids = []
@@ -141,13 +125,20 @@ def get_angles(self: HalfEdgeMesh):
             angle_dict[heid] = a   
     return angle_dict
 
-# %% ../01_tension_time_evolution.ipynb 35
+@patch
+def get_double_angles(self: HalfEdgeMesh):
+    angles = self.get_angles()
+    double_angles = {he._heid: (angles[he._heid]+angles[he._twinid]) for he in self.hes.values()
+                             if (he.face is not None) and (he.twin.face is not None)}
+    return double_angles
+
+# %% ../01_tension_time_evolution.ipynb 32
 import autograd.numpy as anp  # Thinly-wrapped numpy
 from autograd import grad as agrad
 
 from scipy.sparse import csc_matrix
 
-# %% ../01_tension_time_evolution.ipynb 36
+# %% ../01_tension_time_evolution.ipynb 33
 @patch
 def vertices_to_initial_cond(self: HalfEdgeMesh):
     """Format vertices for use in energy minimization."""
@@ -183,7 +174,6 @@ def get_energy_fct(self: HalfEdgeMesh):
     def get_E(x0):
         x, y = (x0[:n_vertices], x0[n_vertices:])
         lengths = anp.sqrt((x[e_lst[0]]
-                            #vertex_into_edge.dot(x)
                             -x[e_lst[1]])**2
                            + (y[e_lst[0]]-y[e_lst[1]])**2)
         E = 1/2 * anp.sum((lengths-rest_lengths)**2)
@@ -193,42 +183,33 @@ def get_energy_fct(self: HalfEdgeMesh):
     
     return get_E, agrad(get_E)
 
-# %% ../01_tension_time_evolution.ipynb 47
-@patch
-def pre_optimize(self: HalfEdgeMesh, fact=.3, n_iter=1):
-    """Greedy pre-optimization"""
-    for i in range(n_iter):
-        for he in self.hes.values():
-            if he.duplicate:
-                rest = (he.rest+he.twin.rest)/2
-                vec = he.vertices[1].coords-he.vertices[0].coords
-                length = norm(vec)
-                delta = fact* vec/length * (length-rest)
-                he.vertices[0].coords += delta/2
-                he.vertices[1].coords -= delta/2
-                
-# for reasons which are fucking beyong me, as a patched class method this is very slow??
-
-# %% ../01_tension_time_evolution.ipynb 69
-from copy import deepcopy
-
-# %% ../01_tension_time_evolution.ipynb 73
+# %% ../01_tension_time_evolution.ipynb 66
 def excitable_dt_post(Ts, Tps, k=1, m=2):
     """Time derivative of tensions under excitable tension model with constrained area,
     with passive tension for post intercalation"""
-    dT_dt = Ts**m - k*Tps
+    dT_dt = (Ts-Tps)**m - k*Tps
     dTp_dt = -k*Tps
-    area_jac = sides_area_jac(Ts)
+    area_jac = sides_area_jac(Ts-Tps)
     area_jac /= norm(area_jac)
     dT_dt -= area_jac * (area_jac@dT_dt)
     return dT_dt, dTp_dt
 
 @patch
-def reset_rest_passive_flip(self: HalfEdgeMesh, e: HalfEdge):
-    """Reset rest length and passive tensions of flipped he according to myosin inheritance"""
+def reset_rest_passive_flip(self: HalfEdgeMesh, e: HalfEdge, method="smooth"):
+    """Reset rest length and passive tensions of flipped he according to myosin inheritance.
+    Two options: "smooth" results in contiuous rest lengths, using the passive contruction,
+    "direct" directly sets the rest length to the values of the neighbors.
+    """
     twin = e.twin
     rest_pre = (e.rest+twin.rest)/2
     rest_neighbors = (e.nxt.rest+e.prev.rest+twin.nxt.rest+twin.prev.rest)/4
-    e.rest = rest_neighbors
-    e.passive = rest_pre-rest_neighbors
-    twin.rest, twin.passive = (e.rest, e.passive)
+    if method == "smooth":
+        e.rest = np.linalg.norm(e.vertices[0].coords - e.vertices[1].coords)
+        e.passive = (rest_pre+e.rest)-2*rest_neighbors
+        twin.rest, twin.passive = (e.rest, e.passive)
+    elif method == "direct":
+        e.rest = rest_neighbors
+        e.passive = rest_pre-rest_neighbors
+        twin.rest, twin.passive = (e.rest, e.passive)
+    else:
+        print("method must be smooth or direct")
