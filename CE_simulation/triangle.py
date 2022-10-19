@@ -605,7 +605,70 @@ def cellplot(self: HalfEdgeMesh, alpha=1, set_lims=False):
         plt.gca().set_xlim([pts[:,0].min(), pts[:,0].max()])
         plt.gca().set_ylim([pts[:,1].min(), pts[:,1].max()])
 
-# %% ../00_triangle_data_structure.ipynb 99
+# %% ../00_triangle_data_structure.ipynb 100
+@patch
+def save_mesh(self: HalfEdgeMesh, fname, d=5):
+    """Save HalfEdgeMesh in as csv file with 3 parts:
+    1. Dual vertices
+        - vertex id (int)
+        - vertex coordinates x, y
+        - one incident edge id
+    2. Faces (triangles)
+        - face id
+        - vertex ids 1-3
+        - dual coords x,y
+        - one edge id
+    3. Half-edges
+        - half-edge ID
+        - vertex ids 1-2
+        - face ids 1-2 (i.e. its own face + its twin)
+        - next, prev, twin
+    See jerryyin.info/geometry-processing-algorithms/half-edge/ for definitions.
+    '#' are comment lines.
+    """
+    # overwrite
+    try:
+        os.remove(fname+".txt")
+    except OSError:
+        pass
+    v_keys = sorted(self.vertices.keys())
+    fc_keys = sorted(self.faces.keys())
+    he_keys = sorted(self.hes.keys())
+
+    with open(fname+".txt", "a") as f:
+        f.write('# Vertices\n')
+        f.write('# vertex id, dual x-coordinate, dual y-coordinate, incident edge id\n')
+        for key in v_keys:
+            v = self.vertices[key]
+            items = ([v._vid]
+                     +[round(v.coords[0], ndigits=d), round(v.coords[1], ndigits=d)]
+                     +[v.incident[0]._heid])
+            to_write = ', '.join([str(x) for x in items]) + '\n'
+            f.write(to_write)
+        f.write('\n# Faces\n')
+        f.write('# face id, primal x-coordinate, primal y-coordinate, vertex id 1, vertex id 2, vertex id 3, edge 1, edge 2, edge 3\n')
+        for key in fc_keys:
+            fc = self.faces[key]
+            items = ([fc._fid]
+                     +[round(fc.dual_coords[0], ndigits=d), round(fc.dual_coords[1], ndigits=d)]
+                     +[he.vertices[0]._vid for he in fc.hes]
+                     +[he._heid for he in fc.hes])
+            to_write = ', '.join([str(x) for x in items]) + '\n'
+            f.write(to_write)
+        f.write('\n# Half-edges\n')
+        f.write('# edge id, vertex id 1, vertex id 2, face id 1, face id 2, next, prev, twin\n')
+        for key in he_keys:
+            he = self.hes[key]
+            items = ([he._heid]
+                     +[v._vid for v in he.vertices]
+                     +[(fc._fid if fc is not None else "None") for fc in [he.face, he.twin.face]]
+                     +[x._heid for x in [he.nxt, he.prev, he.twin]])
+            to_write = ', '.join([str(x) for x in items]) + '\n'
+            f.write(to_write)
+            
+            
+
+# %% ../00_triangle_data_structure.ipynb 103
 @patch
 def get_edge_lens(self: HalfEdgeMesh):
     return {key: np.linalg.norm(val.vertices[1].coords-val.vertices[0].coords)

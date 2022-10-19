@@ -270,17 +270,25 @@ def flatten_triangulation(self: HalfEdgeMesh, tol=1e-3, verbose=True):
     self.set_rest_lengths()
 
 @patch
-def euler_step(self: HalfEdgeMesh, dt=.005, rhs=excitable_dt_post, params=None):
-    """RHS: callable Ts, Tps -> dTs_dt, dTps_dt"""
+def euler_step(self: HalfEdgeMesh, dt=.005, rhs=excitable_dt_post, params=None,
+              rhs_rest_shape=None):
+    """RHS: callable Ts, Tps -> dTs_dt, dTps_dt. Params can either be a dict of keyword args
+    to the RHS function, or a callable faceid -> keyword dict.
+    rhs_rest_shape: fc -> d_rest_shape_dt, for rest shape dynamics (e.g. viscous relaxation)
+    """
+    rhs_rest_shape = (lambda fc: 0) if rhs_rest_shape is None else rhs_rest_shape
+    params = lambda x: params if isinstance(params, dict) else params
     for fc in self.faces.values():
         # collect edges
         Ts, Tps = (np.array([he.rest for he in fc.hes]), np.array([he.passive for he in fc.hes]))
-        dT_dt, dTp_dt = excitable_dt_post(Ts, Tps, **params)
+        dT_dt, dTp_dt = excitable_dt_post(Ts, Tps, **params(fc._fid))
         Ts += dt*dT_dt
         Tps += dt*dTp_dt
         for T, Tp, he in zip(Ts, Tps, fc.hes):
             he.rest = T
             he.passive = Tp
+        fc.rest_shape += dt*rhs_rest_shape(fc)
+
 
 # %% ../02_delaunay_simulation.ipynb 30
 def get_circumcenter(a, b, c):
