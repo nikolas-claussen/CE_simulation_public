@@ -244,7 +244,7 @@ class Vertex:
     _vid : int
     coords : NDArray[Shape["2"], Float]
     incident : List[HalfEdge]
-    
+    rest_shape: NDArray[Shape["2, 2"],Float] = np.array([[1.0, 0.0], [0.0, 1.0]])
     def __repr__(self):
         repr_str = f"Vertex(vid={self._vid}, coords={np.round(self.coords, decimals=1)}, "
         repr_str += f"hes={[he._heid for he in self.incident]})"
@@ -668,7 +668,7 @@ def save_mesh(self: HalfEdgeMesh, fname, d=5):
             
             
 
-# %% ../00_triangle_data_structure.ipynb 103
+# %% ../00_triangle_data_structure.ipynb 106
 @patch
 def get_edge_lens(self: HalfEdgeMesh):
     return {key: np.linalg.norm(val.vertices[1].coords-val.vertices[0].coords)

@@ -18,6 +18,8 @@ import matplotlib as mpl
 from numpy import sin, cos, tan, pi, sqrt, arccos, arctan, arctan2
 from numpy.linalg import norm
 
+from scipy.stats import trim_mean
+
 from scipy.integrate import solve_ivp
 from scipy import ndimage
 from scipy import spatial
@@ -51,13 +53,13 @@ def scale_mat(s):
     return np.diag([s,s])
 
 # %% ../02_delaunay_simulation.ipynb 8
-def get_inertia(pts):
-    """Pts = (n_points, 2)"""
-    pts -= pts.mean(axis=0)
+def get_inertia(pts, q=0):
+    """Pts = (n_points, 2). q=outlier removal"""
+    pts -= trim_mean(pts,q, axis=0)
     x, y = pts.T
-    Ixx = (x**2).mean()
-    Ixy = (x*y).mean()
-    Iyy = (y**2).mean()
+    Ixx = trim_mean(x**2, q)
+    Ixy = trim_mean(x*y, q)
+    Iyy = trim_mean(y**2, q)
     return np.array([[Ixx, Ixy], [Ixy,Iyy]])
     
 
@@ -277,11 +279,13 @@ def euler_step(self: HalfEdgeMesh, dt=.005, rhs=excitable_dt_post, params=None,
     rhs_rest_shape: fc -> d_rest_shape_dt, for rest shape dynamics (e.g. viscous relaxation)
     """
     rhs_rest_shape = (lambda fc: 0) if rhs_rest_shape is None else rhs_rest_shape
-    params = lambda x: params if isinstance(params, dict) else params
     for fc in self.faces.values():
         # collect edges
         Ts, Tps = (np.array([he.rest for he in fc.hes]), np.array([he.passive for he in fc.hes]))
-        dT_dt, dTp_dt = excitable_dt_post(Ts, Tps, **params(fc._fid))
+        if isinstance(params, dict):
+            dT_dt, dTp_dt = excitable_dt_post(Ts, Tps, **params)
+        elif callable(params):
+            dT_dt, dTp_dt = excitable_dt_post(Ts, Tps, **params(fc._fid))
         Ts += dt*dT_dt
         Tps += dt*dTp_dt
         for T, Tp, he in zip(Ts, Tps, fc.hes):
