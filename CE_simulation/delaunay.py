@@ -34,13 +34,17 @@ import sys
 from copy import deepcopy
 
 # %% ../02_delaunay_simulation.ipynb 5
+import autograd.numpy as anp  # Thinly-wrapped numpy
+from autograd import grad as agrad
+
+# %% ../02_delaunay_simulation.ipynb 6
 from dataclasses import dataclass
 from typing import Union, Dict, List, Tuple, Iterable, Callable
 from nptyping import NDArray, Int, Float, Shape
 
 from fastcore.foundation import patch
 
-# %% ../02_delaunay_simulation.ipynb 7
+# %% ../02_delaunay_simulation.ipynb 8
 # geometric transform matrices
 
 def rot_mat(theta):
@@ -52,7 +56,7 @@ def shear_mat(s):
 def scale_mat(s):
     return np.diag([s,s])
 
-# %% ../02_delaunay_simulation.ipynb 8
+# %% ../02_delaunay_simulation.ipynb 9
 def get_inertia(pts, q=0):
     """Pts = (n_points, 2). q=outlier removal"""
     pts -= trim_mean(pts,q, axis=0)
@@ -63,7 +67,7 @@ def get_inertia(pts, q=0):
     return np.array([[Ixx, Ixy], [Ixy,Iyy]])
     
 
-# %% ../02_delaunay_simulation.ipynb 9
+# %% ../02_delaunay_simulation.ipynb 10
 ## Creating initial conditions - triangular lattice
 
 def get_triangular_lattice_convex(nx, ny):
@@ -132,7 +136,7 @@ def get_tri_hemesh(nx=7, ny=11, noise=0):
     mesh.transform_vertices(lambda x: x+np.random.normal(scale=noise, size=(2,)))
     return mesh
 
-# %% ../02_delaunay_simulation.ipynb 11
+# %% ../02_delaunay_simulation.ipynb 12
 from scipy.spatial._plotutils import _adjust_bounds
 from matplotlib.collections import LineCollection
 
@@ -245,7 +249,7 @@ def voronoi_plot_2d_bdry(vor, bdry=None, plot_infinite=False, ax=None, **kw):
 
     return ax.figure
 
-# %% ../02_delaunay_simulation.ipynb 12
+# %% ../02_delaunay_simulation.ipynb 13
 @patch
 def voronoiplot(self: HalfEdgeMesh, **kw):
     bdry_vertices = sorted([he._verticesid[0] for he in self.hes.values() if he.face is None])
@@ -256,7 +260,7 @@ def voronoiplot(self: HalfEdgeMesh, **kw):
     
     voronoi_plot_2d_bdry(vor, bdry=bdry_vertices, show_vertices=False, show_points=False)
 
-# %% ../02_delaunay_simulation.ipynb 25
+# %% ../02_delaunay_simulation.ipynb 26
 @patch
 def flatten_triangulation(self: HalfEdgeMesh, tol=1e-3, verbose=True):
     """Flatten triangulation"""
@@ -283,9 +287,9 @@ def euler_step(self: HalfEdgeMesh, dt=.005, rhs=excitable_dt_post, params=None,
         # collect edges
         Ts, Tps = (np.array([he.rest for he in fc.hes]), np.array([he.passive for he in fc.hes]))
         if isinstance(params, dict):
-            dT_dt, dTp_dt = excitable_dt_post(Ts, Tps, **params)
+            dT_dt, dTp_dt = rhs(Ts, Tps, **params)
         elif callable(params):
-            dT_dt, dTp_dt = excitable_dt_post(Ts, Tps, **params(fc._fid))
+            dT_dt, dTp_dt = rhs(Ts, Tps, **params(fc._fid))
         Ts += dt*dT_dt
         Tps += dt*dTp_dt
         for T, Tp, he in zip(Ts, Tps, fc.hes):
@@ -294,7 +298,7 @@ def euler_step(self: HalfEdgeMesh, dt=.005, rhs=excitable_dt_post, params=None,
         fc.rest_shape += dt*rhs_rest_shape(fc)
 
 
-# %% ../02_delaunay_simulation.ipynb 30
+# %% ../02_delaunay_simulation.ipynb 31
 def get_circumcenter(a, b, c):
     """Return circumcircle radius and circumcenter"""
     b_, c_ = (b-a, c-a)
@@ -303,7 +307,7 @@ def get_circumcenter(a, b, c):
     r = norm(u_)
     return r, u_ + a
 
-# %% ../02_delaunay_simulation.ipynb 32
+# %% ../02_delaunay_simulation.ipynb 33
 def get_voronoi_pos(mesh):
     circumcenter_dict = {}
     for key, fc in mesh.faces.items():

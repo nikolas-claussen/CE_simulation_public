@@ -89,7 +89,7 @@ def sides_area_jac(Ts):
     dA += (Ts[0]+(Ts[1]+Ts[2])) * (Ts[2]-(Ts[0]-Ts[1])) * np.array([1, -1, 1])  * (Ts[0]+(Ts[1]-Ts[2]))
     dA += (Ts[0]+(Ts[1]+Ts[2])) * (Ts[2]-(Ts[0]-Ts[1])) * (Ts[2]+(Ts[0]-Ts[1])) * np.array([1, 1, -1])
 
-    dA /= 48*(sides_area(Ts)+1e-5)
+    dA /= 32*(sides_area(Ts)+1e-5)  # I think it should be 32 not 48.
     return dA
 
 # %% ../01_tension_time_evolution.ipynb 13

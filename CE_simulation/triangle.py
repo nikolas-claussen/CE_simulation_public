@@ -3,7 +3,7 @@
 # %% auto 0
 __all__ = ['flatten', 'sort_vertices', 'sort_ids_by_vertices', 'get_neighbors', 'ListOfVerticesAndFaces', 'get_test_mesh',
            'HalfEdge', 'Vertex', 'Face', 'get_half_edges', 'HalfEdgeMesh', 'get_test_hemesh', 'get_test_mesh_large',
-           'get_test_hemesh_large', 'get_boundary_faces']
+           'get_test_hemesh_large', 'get_boundary_faces', 'load_mesh']
 
 # %% ../00_triangle_data_structure.ipynb 3
 import os
@@ -103,6 +103,14 @@ class ListOfVerticesAndFaces:
         del self.vertices[v_id]
         self.faces = {key: face for key, face in self.faces.items() if not v_id in face}
         self.neighbors = get_neighbors(self.faces)
+    
+    def remove_face(self, f_id):
+        face = self.vertices[f_id]
+        del self.faces[f_id]
+        for v in face:
+            if not any([v in fc for fc in self.faces.values()]):
+                del self.vertices[v]
+        self.neighbors = get_neighbors(self.faces)
         
     def get_combined_edges(self):
         """Get a list of unique edges. Edges are a tuple ((vert 1, vert 2), (face 1, face 2)). Boundary edges 
@@ -143,7 +151,7 @@ def get_test_mesh():
     tri = spatial.Delaunay(points)
     return ListOfVerticesAndFaces(tri.points, tri.simplices)
 
-# %% ../00_triangle_data_structure.ipynb 25
+# %% ../00_triangle_data_structure.ipynb 28
 @patch
 def saveObj(self:ListOfVerticesAndFaces, fname, save_ids=False):
     """save as obj file. .obj automatically appended to fname. If save_ids is True, also save a list
@@ -183,10 +191,10 @@ def saveObj(self:ListOfVerticesAndFaces, fname, save_ids=False):
                 f.write('f '+str(key)+'\n')
 
 
-# %% ../00_triangle_data_structure.ipynb 32
+# %% ../00_triangle_data_structure.ipynb 35
 from dataclasses import dataclass, field
 
-# %% ../00_triangle_data_structure.ipynb 33
+# %% ../00_triangle_data_structure.ipynb 36
 @dataclass
 class HalfEdge:
     """Attribute holder class for half edges. Attributes point to other items, property methods get them."""
@@ -198,7 +206,6 @@ class HalfEdge:
     _verticesid: tuple # 0 is origin, 1 is destination
     rest: float = 0.
     passive: float = 0.
-    flipped: int = 0
     variables: dict = field(default_factory=dict, repr=False) 
     _hemesh: int = field(default=None, repr=False) # set during creation of mesh
     duplicate: bool = False # arbitraily select half of all edges for future iteration convenience
@@ -267,7 +274,7 @@ class Face:
         return repr_str
 
 
-# %% ../00_triangle_data_structure.ipynb 36
+# %% ../00_triangle_data_structure.ipynb 39
 @patch
 def sort_hes(self: Face):
     """Sort the list of hes of a face."""
@@ -284,7 +291,7 @@ def sort_hes(self: Face):
         returned = (he == start_he)
     self.hes = sorted_hes
 
-# %% ../00_triangle_data_structure.ipynb 41
+# %% ../00_triangle_data_structure.ipynb 44
 def get_half_edges(mesh: ListOfVerticesAndFaces) -> Dict[int, HalfEdge]:
     """Create list of half-edges from a ListOfVerticesAndFaces mesh"""
     heid_counter = 0
@@ -323,7 +330,7 @@ def get_half_edges(mesh: ListOfVerticesAndFaces) -> Dict[int, HalfEdge]:
     # turn into dict for easy access
     return {he._heid: he for he in hes}
 
-# %% ../00_triangle_data_structure.ipynb 44
+# %% ../00_triangle_data_structure.ipynb 47
 class HalfEdgeMesh:
     def __init__(self, mesh : ListOfVerticesAndFaces):
         hes = get_half_edges(mesh)
@@ -332,8 +339,6 @@ class HalfEdgeMesh:
         [self.faces[he._faceid].hes.append(he) for he in hes.values() if he._faceid is not None]
         self.vertices = {key: Vertex(key, val, []) for key, val in mesh.vertices.items()}
         [self.vertices[he._verticesid[1]].incident.append(he) for he in hes.values()]
-        #self.edges = {min(he._heid, he.twin): Edge(he._heid, (he, hes[he.twin]), {"flipped": False})
-        #              for he in hes.values() if he.vertices[0] < he.vertices[1]}
         for he in self.hes.values():
             he._hemesh = self
         [fc.sort_hes() for fc in self.faces.values()]
@@ -355,11 +360,11 @@ class HalfEdgeMesh:
     def fromObj(fname):
         return HalfEdgeMesh(ListOfVerticesAndFaces.fromObj(fname))
 
-# %% ../00_triangle_data_structure.ipynb 45
+# %% ../00_triangle_data_structure.ipynb 48
 def get_test_hemesh():
     return HalfEdgeMesh(get_test_mesh())
 
-# %% ../00_triangle_data_structure.ipynb 58
+# %% ../00_triangle_data_structure.ipynb 61
 def get_test_mesh_large(x=np.linspace(0, 1, 25), y=np.linspace(0, 1, 50), noise=.0025):
     pts = np.stack(np.meshgrid(x, y))
     
@@ -376,7 +381,7 @@ def get_test_mesh_large(x=np.linspace(0, 1, 25), y=np.linspace(0, 1, 50), noise=
 def get_test_hemesh_large(x=np.linspace(0, 1, 25), y=np.linspace(0, 1, 50), noise=.0025):
     return HalfEdgeMesh(get_test_mesh_large(x=x, y=y, noise=noise))
 
-# %% ../00_triangle_data_structure.ipynb 65
+# %% ../00_triangle_data_structure.ipynb 68
 @patch
 def reset_hes(self: HalfEdgeMesh, face_or_vertex: Union[Face, Vertex]):
     """Re-create the full list of half edges belonging to a face or vertex based on its first half edge.
@@ -401,7 +406,7 @@ def reset_hes(self: HalfEdgeMesh, face_or_vertex: Union[Face, Vertex]):
             returned = (he == start_he)
         face_or_vertex.incident = new_hes
 
-# %% ../00_triangle_data_structure.ipynb 69
+# %% ../00_triangle_data_structure.ipynb 72
 @patch
 def flip_edge(self: HalfEdgeMesh, e: int):
     """Flip edge of a triangle mesh. Call by using he index
@@ -447,14 +452,12 @@ def flip_edge(self: HalfEdgeMesh, e: int):
     # re-complete the list of half-edges for the vertices and faces
     for vertex_or_face in [f0, f1]+[v3, v4, v2, v1]:
         self.reset_hes(vertex_or_face)
-    # notifiy edge! return the _heid, or set "Flipped" or something!
-    e.flipped, twin.flipped = (True, True)
     # re-order the faces
     f0.sort_hes(); f1.sort_hes()
     
         
 
-# %% ../00_triangle_data_structure.ipynb 81
+# %% ../00_triangle_data_structure.ipynb 84
 @patch
 def is_consistent(self: HalfEdgeMesh):
     """For debugging/testing purposes"""
@@ -479,7 +482,7 @@ def is_consistent(self: HalfEdgeMesh):
     
     return True
 
-# %% ../00_triangle_data_structure.ipynb 87
+# %% ../00_triangle_data_structure.ipynb 90
 @patch
 def is_bdr(self: Face):
     """True if face touches bdr. Check all vertices. Does any have an incident edge with None face?"""
@@ -501,7 +504,7 @@ def get_boundary_faces(msh):
         returned = (he == bdr_start)
     return bdr_faces
 
-# %% ../00_triangle_data_structure.ipynb 88
+# %% ../00_triangle_data_structure.ipynb 91
 @patch
 def get_face_neighbors(self: Vertex):
     """Get face neighbors of vertex"""
@@ -516,7 +519,7 @@ def get_face_neighbors(self: Vertex):
     return neighbors
 
 
-# %% ../00_triangle_data_structure.ipynb 90
+# %% ../00_triangle_data_structure.ipynb 93
 @patch
 def set_centroid(self: HalfEdgeMesh):
     """Set dual positions to triangle centroid"""
@@ -531,7 +534,7 @@ def set_centroid(self: HalfEdgeMesh):
             returned = (he == start_he)
         fc.dual_coords = np.mean(vecs, axis=0)
 
-# %% ../00_triangle_data_structure.ipynb 92
+# %% ../00_triangle_data_structure.ipynb 95
 @patch
 def transform_vertices(self: HalfEdgeMesh, trafo: Union[Callable, NDArray[Shape["2, 2"], Float]]):
     for v in self.vertices.values():
@@ -548,7 +551,7 @@ def transform_dual_vertices(self: HalfEdgeMesh, trafo: Union[Callable, NDArray[S
         else:
             fc.dual_coords = trafo.dot(fc.dual_coords)
 
-# %% ../00_triangle_data_structure.ipynb 94
+# %% ../00_triangle_data_structure.ipynb 97
 @patch
 def triplot(self: HalfEdgeMesh):
     """wraps plt.triplot"""
@@ -605,7 +608,7 @@ def cellplot(self: HalfEdgeMesh, alpha=1, set_lims=False):
         plt.gca().set_xlim([pts[:,0].min(), pts[:,0].max()])
         plt.gca().set_ylim([pts[:,1].min(), pts[:,1].max()])
 
-# %% ../00_triangle_data_structure.ipynb 100
+# %% ../00_triangle_data_structure.ipynb 103
 @patch
 def save_mesh(self: HalfEdgeMesh, fname, d=5):
     """Save HalfEdgeMesh in as csv file with 3 parts:
@@ -628,14 +631,14 @@ def save_mesh(self: HalfEdgeMesh, fname, d=5):
     """
     # overwrite
     try:
-        os.remove(fname+".txt")
+        os.remove(fname)
     except OSError:
         pass
     v_keys = sorted(self.vertices.keys())
     fc_keys = sorted(self.faces.keys())
     he_keys = sorted(self.hes.keys())
 
-    with open(fname+".txt", "a") as f:
+    with open(fname, "a") as f:
         f.write('# Vertices\n')
         f.write('# vertex id, dual x-coordinate, dual y-coordinate, incident edge id\n')
         for key in v_keys:
@@ -668,7 +671,37 @@ def save_mesh(self: HalfEdgeMesh, fname, d=5):
             
             
 
-# %% ../00_triangle_data_structure.ipynb 106
+# %% ../00_triangle_data_structure.ipynb 105
+def load_mesh(fname):
+    """Load from file as saved by mesh.save_mesh"""
+    with open(fname) as f:
+        lines = f.readlines()
+    vind, find, heind = [lines.index(x) for x in ['# Vertices\n', '# Faces\n', '# Half-edges\n',]]
+    vlines, flines, helines = [lines[vind+2:find-1], lines[find+2:heind-1], lines[heind+2:]]
+    vlines, flines, helines = [[x.strip('\n').split(', ') for x in y] for y in [vlines, flines, helines]]
+    vlines = [[int(x[0]), float(x[1]), float(x[2]), int(x[3])] for x in vlines]
+    flines = [[int(x[0]), float(x[1]), float(x[2]), int(x[3]), int(x[4]), int(x[5]),
+               int(x[6]), int(x[7]), int(x[8])] for x in flines]
+    int_None = lambda x: int(x) if x != 'None' else None
+    helines = [[int(x[0]), int(x[1]), int(x[2]), int_None(x[3]), int_None(x[4]),
+                int(x[5]), int(x[6]), int(x[7])] for x in helines]
+
+    hes = {x[0]: HalfEdge(_heid=x[0], _nxtid=x[5], _previd=x[6], _twinid=x[7], _faceid=x[3],
+                          _verticesid=(x[1], x[2])) for x in helines}
+    vertices = {x[0]: Vertex(_vid=x[0], coords=np.array([x[1], x[2]]), incident=[hes[x[-1]]]) for x in vlines}
+    faces = {x[0]: Face(_fid=x[0], dual_coords=np.array([x[1], x[2]]), hes=[hes[x[-1]]] ) for x in flines}
+
+    hemesh = HalfEdgeMesh(ListOfVerticesAndFaces([],[]))
+    hemesh.hes = hes
+    hemesh.vertices = vertices
+    hemesh.faces = faces
+    for he in hemesh.hes.values():
+        he._hemesh = hemesh
+    [hemesh.reset_hes(v) for v in hemesh.vertices.values()]
+    [hemesh.reset_hes(fc) for fc in hemesh.faces.values()]
+    return hemesh
+
+# %% ../00_triangle_data_structure.ipynb 110
 @patch
 def get_edge_lens(self: HalfEdgeMesh):
     return {key: np.linalg.norm(val.vertices[1].coords-val.vertices[0].coords)

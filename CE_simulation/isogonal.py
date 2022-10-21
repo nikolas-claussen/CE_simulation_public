@@ -80,13 +80,25 @@ def get_shape_tensor(self: Vertex):
 
 # %% ../03_real_shape_optimization.ipynb 16
 @patch
+def get_shape_energy(self: HalfEdgeMesh, mod_shear=.1, mod_bulk=1):
+    res_dict = {}
+    for v in self.vertices.values():
+        if None in v.get_face_neighbors():
+            res_dict[v._vid] = None
+        else:
+            delta = v.get_shape_tensor()-v.rest_shape
+            res_dict[v._vid] = mod_shear*(delta**2).sum()+mod_bulk*np.trace(delta)**2
+    return res_dict
+
+# %% ../03_real_shape_optimization.ipynb 17
+@patch
 def get_stress_tensor(self: Face):
     verts = np.stack([he.vertices[0].coords for he in self.hes])
     edges = verts - np.roll(verts, 1, axis=0)
     edges = np.stack([-edges[:,1], edges[:,0]])
     return 2/3*np.einsum('ie,je->ij', edges, edges)
 
-# %% ../03_real_shape_optimization.ipynb 19
+# %% ../03_real_shape_optimization.ipynb 20
 def polygon_area(pts):
     """area of polygon assuming no self-intersection. pts.shape (n_vertices, 2)"""
     return anp.sum(pts[:,0]*anp.roll(pts[:,1], 1, axis=0) - anp.roll(pts[:,0], 1, axis=0)*pts[:,1], axis=0)/2
@@ -106,7 +118,7 @@ def get_area(self: Vertex):
         return None
     return polygon_area(np.stack([fc.dual_coords for fc in neighbors]))
 
-# %% ../03_real_shape_optimization.ipynb 27
+# %% ../03_real_shape_optimization.ipynb 28
 @patch
 def dual_vertices_to_initial_cond(self: HalfEdgeMesh):
     """Format dual vertices for use in energy minimization."""
@@ -123,7 +135,7 @@ def initial_cond_to_dual_vertices(self: HalfEdgeMesh, x0):
     return {key: val for key, val in zip(face_keys, dual_vertex_vector)}
 
 
-# %% ../03_real_shape_optimization.ipynb 29
+# %% ../03_real_shape_optimization.ipynb 30
 @patch
 def get_angle_deviation(self: HalfEdgeMesh):
     """Angle between primal and dual edges. For diagnostics"""
@@ -137,87 +149,6 @@ def get_angle_deviation(self: HalfEdgeMesh):
             primal_edge = primal_edge / np.linalg.norm(primal_edge)        
             angle_deviation[he._heid] = np.abs(np.dot(dual_edge, primal_edge))
     return angle_deviation
-
-# %% ../03_real_shape_optimization.ipynb 33
-@patch
-def get_primal_energy_fct_vertices(self: HalfEdgeMesh, mod_bulk=1, mod_shear=.01, angle_penalty=100,
-                                   reg_bulk=0, A0=sqrt(3)/2, epsilon_l=1e-5):
-    """Get function to compute primal energy from primal vertices. Vertex-based shape tensor"""
-
-    # stuff for the shape tensor energy
-    face_list = []    
-    face_key_dict = {key: ix for ix, key in enumerate(sorted(self.faces.keys()))}
-    face_key_dict[None] = None
-    rest_shapes = []
-    for fc in self.faces.values():
-        neighbors = [he.twin.face for he in fc.hes]
-        if not (None in neighbors):
-            face_list.append(anp.array([face_key_dict[x._fid] for x in neighbors]
-                                      +[face_key_dict[fc._fid]]))
-            rest_shapes.append(fc.rest_shape)
-    face_list = anp.array(face_list).T
-    rest_shapes = anp.stack(rest_shapes)
-    n_faces = len(self.faces)
-
-    # stuff for the vertex-energy-based regularization
-    if reg_bulk>0:
-        cell_list = []
-        for v in self.vertices.values():    # iterate around vertex.
-            neighbors = v.get_face_neighbors()
-            if not (None in neighbors):
-                cell = [face_key_dict[fc._fid] for fc in neighbors]
-                cell_list.append(cell)
-        max_valence = max([len(cell) for cell in cell_list])
-        cell_list = anp.array([anp.pad(cell, (0, max_valence-len(cell)), mode="edge") for cell in cell_list])
-    
-    # stuff for the angle penalty
-    e_dual = [] # dual vertices do not move during optimization, so collect the actual edges
-    e_lst_primal = [] # for primal, collect the indices
-
-    for he in self.hes.values():
-        if (he.face is not None) and (he.twin.face is not None) and he.duplicate:
-            dual_edge = he.vertices[1].coords-he.vertices[0].coords
-            # rotate by 90 degrees
-            dual_edge = anp.array([dual_edge[1], -dual_edge[0]])
-            dual_edge = dual_edge / np.linalg.norm(dual_edge)
-            primal_edge = [face_key_dict[fc._fid] for fc in [he.face, he.twin.face]] # 0= he, 1= twin
-            e_dual.append(dual_edge)
-            e_lst_primal.append(primal_edge)
-    e_dual = anp.array(e_dual)
-    e_lst_primal = anp.array(e_lst_primal)
-    
-    # breaking translational invariance.
-    center = anp.mean([v.coords for v in self.vertices.values()], axis=0)
-    
-    def get_E(x0):
-        x, y = (x0[:n_faces], x0[n_faces:])
-        pts = anp.stack([x, y], axis=-1)
-        # shape energy
-        edges = anp.stack([pts[a]-pts[face_list[3]] for a in face_list[:3]])
-        lengths = anp.linalg.norm(edges, axis=-1) + 10*epsilon_l # + epsilon to avoid 0-division error
-        units = (edges.T/lengths.T).T        
-        tensors = 2*anp.einsum('efi,efj->fij', edges, units) - rest_shapes
-        E_shape = (mod_shear*4*anp.mean(tensors**2)
-                   + mod_bulk*anp.mean((tensors[:,0,0]+tensors[:,1,1])**2))
-        # regularize with the vertex model energy
-        if reg_bulk > 0:
-            poly = anp.stack([[x[i], y[i]] for i in cell_list.T]) # shape (max_valence, 2, n_cells)
-            E_vertex = reg_bulk*anp.mean((polygon_area(poly)-A0)**2)
-        else:
-            E_vertex = 0
-        # angle penalty
-        e_primal = pts[e_lst_primal[:,1]] - pts[e_lst_primal[:,0]] # he.twin.face-he.face
-        lengths = anp.linalg.norm(e_primal, axis=-1) 
-        # + epsilon to avoid 0-division error and make penalty smooth as length passes through 0
-        # makes energy barrier so need epsilon small!
-        penalty = (1-anp.einsum('ei,ei->e', e_primal, e_dual)/(lengths+epsilon_l))
-        E_angle = angle_penalty * anp.mean(penalty) 
-        # break translation symmetry
-        E_trans = 1/2*((anp.mean(x)-center[0])**2+(anp.mean(y)-center[0]))**2
-        
-        return  E_angle + E_shape + E_vertex + E_trans
-    
-    return get_E, agrad(get_E)
 
 # %% ../03_real_shape_optimization.ipynb 34
 @patch
