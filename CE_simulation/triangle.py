@@ -586,24 +586,47 @@ def labelplot(self: HalfEdgeMesh, vertex_labels=True, face_labels=True,
                 plt.text(*centroid, str(he._heid), color="tab:orange")
                 
 @patch
-def cellplot(self: HalfEdgeMesh, alpha=1, set_lims=False):
-    """Plot based on primal positions. Now fast because of use of LineCollection"""
+def cellplot(self: HalfEdgeMesh, alpha=1, set_lims=False, edge_colors=None, cell_colors=None):
+    """Plot based on primal positions. Now fast because of use of LineCollection.
+    edge_colors, cell_colors are dicts _heid, _vid : color. Need only specify non-default elements.
+    """
     face_keys = sorted(self.faces.keys())
     face_key_dict = {key: ix for ix, key in enumerate(face_keys)}
     face_key_dict[None] = None
     primal_face_list = []
+    
+    reformated_cell = (defaultdict(lambda: (0,0,0,0)) if cell_colors is None
+                       else defaultdict(lambda: (0,0,0,0), cell_colors))
+    facecolors = []
     for v in self.vertices.values():
         neighbors = v.get_face_neighbors()
         if not (None in neighbors):
+            facecolors.append(reformated_cell[v._vid])
             face = [face_key_dict[fc._fid] for fc in neighbors]
             face.append(face[0])
             primal_face_list.append(face)
-
+    
     pts = np.stack([self.faces[key].dual_coords for key in face_keys])
-    lines = [[pts[v] for v in fc] for fc in primal_face_list]
+    lines = flatten([[[pts[a],pts[b]] for a, b  in zip(fc, np.roll(fc, 1))]
+                     for fc in primal_face_list], max_depth=1)
+    cells = [[pts[v] for v in fc] for fc in primal_face_list]
+    
+    reformated_edge = defaultdict(lambda: "k")
+    if edge_colors is not None: # translate from _heid : color to 
+        for key, val in edge_colors.items():
+            he = self.hes[key]
+            if (he.face is not None) and (he.twin.face is not None):
+                newkey = (face_key_dict[he.face._fid], face_key_dict[he.twin.face._fid])
+                reformated_edge[newkey] = reformated_edge[newkey[::-1]] = val
+    colors = list(flatten([[reformated_edge[(a, b)] for a, b  in zip(fc, np.roll(fc, 1))]
+                            for fc in primal_face_list], max_depth=1))
     
     #fig, ax = plt.subplots()
-    plt.gca().add_collection(LineCollection(lines, color="k", alpha=alpha))
+    plt.gca().add_collection(LineCollection(lines, colors=colors, alpha=alpha))
+    if cell_colors is not None:
+        plt.gca().add_collection(LineCollection(cells, facecolors=facecolors,
+                                                colors=(0,0,0,0)))
+    
     if set_lims:
         plt.gca().set_xlim([pts[:,0].min(), pts[:,0].max()])
         plt.gca().set_ylim([pts[:,1].min(), pts[:,1].max()])

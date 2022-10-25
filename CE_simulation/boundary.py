@@ -17,6 +17,7 @@ import importlib
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib as mpl
+from matplotlib.collections import LineCollection
 
 from numpy import sin, cos, tan, pi, sqrt, arccos, arctan, arctan2
 from numpy.linalg import norm
@@ -30,7 +31,7 @@ from tqdm.notebook import tqdm
 
 from copy import deepcopy
 
-from collections import Counter
+from collections import Counter, defaultdict
 
 # %% ../04_boundary_conditions.ipynb 5
 from dataclasses import dataclass
@@ -169,7 +170,7 @@ def set_bdry(self: HalfEdgeMesh, bdry_ids, bdry_coords):
             elif coord[0] =="y":
                 self.faces[fcid].dual_coords[1] = coord[1]
 
-# %% ../04_boundary_conditions.ipynb 27
+# %% ../04_boundary_conditions.ipynb 29
 def get_triangular_lattice(nx, ny):
     """get triangular lattice with nx, ny points. Return a mask which delinates bdry vertices""" 
 
@@ -186,19 +187,27 @@ def get_triangular_lattice(nx, ny):
     
     return pts, is_bdry
 
-def create_rect_mesh(nx, ny, noise=0, defects=(0,0)):
+def create_rect_mesh(nx, ny, noise=0, defects=(0,0), straight_bdry=False):
     pts, is_bdry = get_triangular_lattice(nx, ny)
     pts[:,~is_bdry.astype(bool)] += np.random.normal(scale=noise, size=(2, (~is_bdry.astype(bool)).sum()))
     if defects[0] > 0:
         ix = np.random.choice(np.where(1-is_bdry)[0], size=defects[0], replace=False)
         pts = np.delete(pts, ix, axis=1)
     if defects[1] > 0:
-        pass # to be implemented
+        ix = np.random.choice(np.where(1-is_bdry)[0], size=defects[1], replace=False)
+        split = np.random.choice((0,1), len(ix))
+        additional_pts =  pts[:, ix] + .3*np.stack([1-split, split]) 
+        pts[:, ix] -= .3*np.stack([1-split, split]) 
+        pts = np.hstack([pts, additional_pts])
+    
     tri = spatial.Delaunay(pts.T)
     # remove the left, right edge
-    max_x, min_x = (pts[0].max(), pts[0].min())
-    simplices = np.stack([x for x in tri.simplices
-                      if (np.isclose(pts[0,x], min_x).sum()<2) and (np.isclose(pts[0,x], max_x).sum()<2)])
+    if straight_bdry:
+        simplices = tri.simplices
+    else:
+        max_x, min_x = (pts[0].max(), pts[0].min())
+        simplices = np.stack([x for x in tri.simplices
+                          if (np.isclose(pts[0,x], min_x).sum()<2) and (np.isclose(pts[0,x], max_x).sum()<2)])
     pre_mesh = ListOfVerticesAndFaces(tri.points, simplices)
     mesh = HalfEdgeMesh(pre_mesh)
     
@@ -206,7 +215,7 @@ def create_rect_mesh(nx, ny, noise=0, defects=(0,0)):
 
 # might want to add the corner pts.
 
-# %% ../04_boundary_conditions.ipynb 36
+# %% ../04_boundary_conditions.ipynb 39
 def excitable_dt_act_pass(Ts, Tps, k=1, m=2):
     """Time derivative of tensions under excitable tension model with constrained area,
     with passive tension for post intercalation. Variant: completely deactivate feedback for m=1"""
