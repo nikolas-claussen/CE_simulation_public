@@ -48,39 +48,33 @@ from matplotlib import animation, rc
 import autograd.numpy as anp  # Thinly-wrapped numpy
 from autograd import grad as agrad
 
-# %% ../04_boundary_conditions.ipynb 12
+# %% ../04_boundary_conditions.ipynb 18
 def mat_inv_2d(mat):
     """mat.shape = (i,j, ...)"""
     inv = 1/(mat[0,0]*mat[1,1]-mat[0,1]*mat[1,0])*anp.stack([[mat[1,1], -mat[0,1]],[-mat[1,0], mat[0,0]]])
     return inv
 
-# %% ../04_boundary_conditions.ipynb 14
+# %% ../04_boundary_conditions.ipynb 19
 @patch
 def get_primal_energy_fct_cells_bdry(self: HalfEdgeMesh, mod_bulk=1, mod_shear=.01, angle_penalty=100,
                                      reg_bulk=0, A0=sqrt(3)/2, epsilon_l=1e-5,
-                                     bdry_penalty=20, bdry_ids=None, bdry_penalty_fcts=None, bdry_coords=None):
+                                     bdry_penalty=20, bdry_ids=None, bdry_penalty_fcts=None):
     """Get function to compute primal energy from primal vertices. Cell based shape tensor.
-    bdry_penalty_fcts: (2, n_vertices) -> energy. Also replaced it by scale invariant energy.
+    bdry_penalty_fcts: (2, ...) -> energy. bdry_ids = [vertex id,]
     """
-    bdry_method = None
-    if bdry_penalty_fcts is not None:
-        bdry_method = "penalty"
-    elif bdry_coords is not None:
-        bdry_method = "frozen"
 
     if bdry_ids is None:
         bdry_ids = []
         bdry_penalty_fcts = []
-        bdry_coords = []
     # book-keeping
     face_keys = sorted(self.faces.keys())
     face_key_dict = {key: ix for ix, key in enumerate(sorted(self.faces.keys()))}
     n_faces = len(self.faces)
     
-    # for bdry
-    bdry_masks = [anp.array([(fid in ids) for fid in face_keys]) for ids in bdry_ids]
-    bdry_ids = [anp.stack([face_key_dict[fid] for fid in ids]) for ids in bdry_ids]
-
+    # for bdry - need to move this into cell
+    bdry_ids = [[anp.stack([face_key_dict[fc._fid] for fc in self.vertices[v].get_face_neighbors()
+                           if fc is not None]) for v in ids]
+                for ids in bdry_ids]
     # stuff for the shape tensor energy
     cell_list = []
     rest_shapes = []
@@ -117,13 +111,6 @@ def get_primal_energy_fct_cells_bdry(self: HalfEdgeMesh, mod_bulk=1, mod_shear=.
     
     def get_E(x0):
         x, y = (x0[:n_faces], x0[n_faces:])
-        # freeze boundary
-        if bdry_method == "frozen":
-            for msk, coord in zip(bdry_masks, bdry_coords):
-                if coord[0] == "x":
-                    x = x*(1-msk) + msk*coord[1]
-                elif coord[0] == "y":
-                    y = y*(1-msk) + msk*coord[1]
         pts = anp.stack([x, y], axis=-1)
         # face-based shape energy
         cells = anp.stack([pts[i] for i in cell_list.T], axis=0)
@@ -153,14 +140,15 @@ def get_primal_energy_fct_cells_bdry(self: HalfEdgeMesh, mod_bulk=1, mod_shear=.
         E_trans = 1/2*((anp.mean(x)-center[0])**2+(anp.mean(y)-center[0]))**2
         # boundary energy
         E_bdry = 0
-        if bdry_method == "penalty":
-            for ids, fct in zip(bdry_ids, bdry_penalty_fcts):
-                E_bdry = E_bdry+bdry_penalty*anp.mean(fct(pts[ids,:].T))
-        return E_angle + E_shape + E_vertex + E_trans + E_bdry
+        for bdry_component, fct in zip(bdry_ids, bdry_penalty_fcts):
+            for v in bdry_component:
+                centroid = pts[v,:].mean(axis=0)
+                E_bdry = E_bdry+bdry_penalty*fct(centroid)
+        return E_angle + E_shape + E_vertex + E_bdry #+ E_trans
     
     return get_E, agrad(get_E)
 
-# %% ../04_boundary_conditions.ipynb 15
+# %% ../04_boundary_conditions.ipynb 20
 @patch
 def set_bdry(self: HalfEdgeMesh, bdry_ids, bdry_coords):
     for bdry, coord in zip(bdry_ids, bdry_coords):
@@ -170,7 +158,7 @@ def set_bdry(self: HalfEdgeMesh, bdry_ids, bdry_coords):
             elif coord[0] =="y":
                 self.faces[fcid].dual_coords[1] = coord[1]
 
-# %% ../04_boundary_conditions.ipynb 29
+# %% ../04_boundary_conditions.ipynb 35
 def get_triangular_lattice(nx, ny):
     """get triangular lattice with nx, ny points. Return a mask which delinates bdry vertices""" 
 
@@ -215,7 +203,7 @@ def create_rect_mesh(nx, ny, noise=0, defects=(0,0), straight_bdry=False):
 
 # might want to add the corner pts.
 
-# %% ../04_boundary_conditions.ipynb 39
+# %% ../04_boundary_conditions.ipynb 45
 def excitable_dt_act_pass(Ts, Tps, k=1, m=2):
     """Time derivative of tensions under excitable tension model with constrained area,
     with passive tension for post intercalation. Variant: completely deactivate feedback for m=1"""
