@@ -158,7 +158,7 @@ def set_bdry(self: HalfEdgeMesh, bdry_ids, bdry_coords):
             elif coord[0] =="y":
                 self.faces[fcid].dual_coords[1] = coord[1]
 
-# %% ../04_boundary_conditions.ipynb 35
+# %% ../04_boundary_conditions.ipynb 46
 def get_triangular_lattice(nx, ny):
     """get triangular lattice with nx, ny points. Return a mask which delinates bdry vertices""" 
 
@@ -203,7 +203,7 @@ def create_rect_mesh(nx, ny, noise=0, defects=(0,0), straight_bdry=False):
 
 # might want to add the corner pts.
 
-# %% ../04_boundary_conditions.ipynb 45
+# %% ../04_boundary_conditions.ipynb 56
 def excitable_dt_act_pass(Ts, Tps, k=1, m=2):
     """Time derivative of tensions under excitable tension model with constrained area,
     with passive tension for post intercalation. Variant: completely deactivate feedback for m=1"""
