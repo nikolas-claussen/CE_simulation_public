@@ -21,6 +21,8 @@ tags
 *.pdf
 *.obj
 *.txt
+plots/
+runs/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

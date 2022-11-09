@@ -411,10 +411,14 @@ def reset_hes(self: HalfEdgeMesh, face_or_vertex: Union[Face, Vertex]):
 def flip_edge(self: HalfEdgeMesh, e: int):
     """Flip edge of a triangle mesh. Call by using he index
     If the two adjacent faces are not triangles, it does not work!
+    If any of the half-edge vertices has <4 neighbors, return an error - such a flip is impossible,
+    since it would remove one of the edges of a triangular (dual) cell.
     For variable name convention, see jerryyin.info/geometry-processing-algorithms/half-edge/"""
     # by convention, always flip the duplicate
     e = self.hes[e]
     e = e if e.duplicate else e.twin
+    if any([len(v.incident) < 4 for v in he.vertices]):
+        raise ValueError('Cannot flip edge of triangular cell')
     if e._faceid is None or e.twin._faceid is None:
         raise ValueError('Cannot flip boundary edge')
     # collect the required objects
