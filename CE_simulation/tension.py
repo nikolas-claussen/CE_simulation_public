@@ -2,7 +2,7 @@
 
 # %% auto 0
 __all__ = ['vectors_angle', 'sides_area', 'sides_circum', 'sides_angles', 'angles_shape', 'sides_area_jac', 'excitable_dt',
-           'excitable_dt_post']
+           'tri_area', 'excitable_dt_post']
 
 # %% ../01_tension_time_evolution.ipynb 3
 from .triangle import *
@@ -154,36 +154,64 @@ def initial_cond_to_vertices(self: HalfEdgeMesh, x0):
     vertex_vector = np.stack([x, y], axis=1)
     return {key: val for key, val in zip(vertex_keys, vertex_vector)}
 
+def tri_area(x, y):
+    """Shape (3, ...)"""
+    return anp.sum(x*anp.roll(y, 1, axis=0) - anp.roll(x, 1, axis=0)*y, axis=0)/2
+
 @patch
-def get_energy_fct(self: HalfEdgeMesh):
-    """Get energy function sum_edges (l_e -l_e,0)^2. remove translation mode by keeping COM fixed."""
+def get_energy_fct(self: HalfEdgeMesh, A0=sqrt(3)/4, reg_A=0):
+    """Get energy function sum_edges (l_e -l_e,0)^2. remove translation mode by keeping COM fixed.
+    Added regularization by fixing triangle areas. Reference [1,1,1] has area sqrt(3)/4
+    """
     e_lst = []
+    tri_lst = []
     rest_lengths = []
 
     # we will need to look up which vertex key corresponds to list position
     vertex_key_dict = {key: ix for ix, key in enumerate(sorted(self.vertices.keys()))}
+    
     for e in self.hes.values():
         if e.duplicate: # avoid duplicates
             e_lst.append([vertex_key_dict[v._vid] for v in e.vertices])
             rest_lengths.append((e.rest+e.twin.rest)/2)
-
     e_lst = anp.array(e_lst).T
     rest_lengths = anp.array(rest_lengths)
+    
+    for fc in self.faces.values():
+        tri_lst.append([vertex_key_dict[he.vertices[0]._vid] for he in fc.hes])
+    tri_lst = anp.array(tri_lst).T
+    
     center = anp.mean([val.coords for val in self.vertices.values()], axis=0)
     n_vertices = len(self.vertices)
-    def get_E(x0):
-        x, y = (x0[:n_vertices], x0[n_vertices:])
-        lengths = anp.sqrt((x[e_lst[0]]
-                            -x[e_lst[1]])**2
-                           + (y[e_lst[0]]-y[e_lst[1]])**2)
-        E = 1/2 * anp.sum((lengths-rest_lengths)**2)
-        # displacement from initial center
-        E = E + 1/2*((anp.mean(x)-center[0])**2+(anp.mean(y)-center[0]))**2
-        return E
-    
+    if reg_A == 0:
+        def get_E(x0):
+            x, y = (x0[:n_vertices], x0[n_vertices:])
+            lengths = anp.sqrt((x[e_lst[0]]
+                                -x[e_lst[1]])**2
+                               + (y[e_lst[0]]-y[e_lst[1]])**2)
+            E = 1/2 * anp.sum((lengths-rest_lengths)**2)
+            # displacement from initial center
+            E = E + 1/2*((anp.mean(x)-center[0])**2+(anp.mean(y)-center[0]))**2
+            return E
+    else:
+        def get_E(x0):
+            x, y = (x0[:n_vertices], x0[n_vertices:])
+            lengths = anp.sqrt((x[e_lst[0]]
+                                -x[e_lst[1]])**2
+                               + (y[e_lst[0]]-y[e_lst[1]])**2)
+            E = 1/2 * anp.sum((lengths-rest_lengths)**2)
+            # triangle area penalty
+            A = tri_area(x[tri_lst], y[tri_lst])
+            E = E + reg_A/2 * anp.sum((A-A0)**2)
+            # displacement from initial center
+            E = E + 1/2*((anp.mean(x)-center[0])**2+(anp.mean(y)-center[0]))**2
+            return E
     return get_E, agrad(get_E)
 
-# %% ../01_tension_time_evolution.ipynb 66
+# should replace sum by mean -might break stuff, e.g. optimizer tolerances
+# also: might make things scale invariant, e.g. divide by lengths.
+
+# %% ../01_tension_time_evolution.ipynb 71
 def excitable_dt_post(Ts, Tps, k=1, m=2):
     """Time derivative of tensions under excitable tension model with constrained area,
     with passive tension for post intercalation"""

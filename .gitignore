@@ -21,6 +21,7 @@ tags
 *.pdf
 *.obj
 *.txt
+*.mp4
 plots/
 runs/
 

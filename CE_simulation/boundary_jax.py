@@ -268,6 +268,22 @@ def euler_step(self: HalfEdgeMesh, dt=.005, rhs=excitable_dt_post, params=None,
 
 # %% ../04b_boundary_conditions_jax.ipynb 37
 @patch
+def flatten_triangulation(self: HalfEdgeMesh, tol=1e-3, verbose=True, reg_A=0, A0=sqrt(3)/4):
+    """Flatten triangulation"""
+    get_E, grd = self.get_energy_fct(reg_A=0, A0=A0)
+    x0 = self.vertices_to_initial_cond()
+    sol = optimize.minimize(get_E, x0, method="CG", jac=grd, tol=tol)
+    if sol["status"] !=0 and verbose:
+        print("Triangulation optimization failed")
+        print(sol["message"])
+    new_coord_dict = self.initial_cond_to_vertices(sol["x"])
+    for key, val in self.vertices.items():
+        val.coords = new_coord_dict[key]
+    self.set_rest_lengths()
+
+
+# %% ../04b_boundary_conditions_jax.ipynb 38
+@patch
 def optimize_cell_shape(self: HalfEdgeMesh, bdry_list=None,
                         energy_args=None, cell_id_to_modulus=None,
                         tol=1e-3, maxiter=500, verbose=True):
@@ -295,13 +311,17 @@ def optimize_cell_shape(self: HalfEdgeMesh, bdry_list=None,
     for key, val in self.faces.items():
         val.dual_coords = new_coord_dict[key]
 
-# %% ../04b_boundary_conditions_jax.ipynb 38
+# %% ../04b_boundary_conditions_jax.ipynb 39
 def excitable_dt_act_pass(Ts, Tps, k=1, m=2, k3=.2):
     """Time derivative of tensions under excitable tension model with constrained area,
     with passive tension for post intercalation. Variant: completely deactivate feedback for m=1.
     k3 is a cutoff in the excitable tension dynamics, for numerical stability at the mesh edges.
     """
-    dT_dt = (m-1)*((Ts-Tps)**m - k3*(Ts-Tps)**3 - k*Tps)
+    #dT_dt = (m-1)*((Ts-Tps)**m - k3*(Ts-Tps)**3 - k*Tps)
+    # use relative tension
+    T_mean = Ts.mean()
+    dT_dt = T_mean *((m-1)*(((Ts-Tps)/T_mean)**m - k3*((Ts-Tps)/T_mean)**3 - k*Tps/T_mean ) )
+    
     dTp_dt = -k*Tps
     area_jac = sides_area_jac(Ts-Tps)
     area_jac /= norm(area_jac)

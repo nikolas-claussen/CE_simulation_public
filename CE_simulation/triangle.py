@@ -417,7 +417,7 @@ def flip_edge(self: HalfEdgeMesh, e: int):
     # by convention, always flip the duplicate
     e = self.hes[e]
     e = e if e.duplicate else e.twin
-    if any([len(v.incident) < 4 for v in he.vertices]):
+    if any([len(v.incident) < 4 for v in e.vertices]):
         raise ValueError('Cannot flip edge of triangular cell')
     if e._faceid is None or e.twin._faceid is None:
         raise ValueError('Cannot flip boundary edge')
