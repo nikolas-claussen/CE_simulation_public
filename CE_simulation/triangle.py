@@ -456,8 +456,8 @@ def flip_edge(self: HalfEdgeMesh, e: int):
     # re-complete the list of half-edges for the vertices and faces
     for vertex_or_face in [f0, f1]+[v3, v4, v2, v1]:
         self.reset_hes(vertex_or_face)
-    # re-order the faces
-    f0.sort_hes(); f1.sort_hes()
+    # re-order the faces - should be unnecessary?
+    #f0.sort_hes(); f1.sort_hes()
     
         
 

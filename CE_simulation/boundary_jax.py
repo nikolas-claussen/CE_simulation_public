@@ -241,7 +241,7 @@ def get_conformal_transform(mesh1, mesh2):
     return lambda x: rotation.T@(rescale*(x-mean2))+mean1
 
 
-# %% ../04b_boundary_conditions_jax.ipynb 36
+# %% ../04b_boundary_conditions_jax.ipynb 37
 @patch
 def euler_step(self: HalfEdgeMesh, dt=.005, rhs=excitable_dt_post, params=None,
                rhs_rest_shape=None):
@@ -266,7 +266,7 @@ def euler_step(self: HalfEdgeMesh, dt=.005, rhs=excitable_dt_post, params=None,
         v.rest_shape += dt*rhs_rest_shape(v)
 
 
-# %% ../04b_boundary_conditions_jax.ipynb 37
+# %% ../04b_boundary_conditions_jax.ipynb 38
 @patch
 def flatten_triangulation(self: HalfEdgeMesh, tol=1e-3, verbose=True, reg_A=0, A0=sqrt(3)/4):
     """Flatten triangulation"""
@@ -282,7 +282,7 @@ def flatten_triangulation(self: HalfEdgeMesh, tol=1e-3, verbose=True, reg_A=0, A
     self.set_rest_lengths()
 
 
-# %% ../04b_boundary_conditions_jax.ipynb 38
+# %% ../04b_boundary_conditions_jax.ipynb 40
 @patch
 def optimize_cell_shape(self: HalfEdgeMesh, bdry_list=None,
                         energy_args=None, cell_id_to_modulus=None,
@@ -311,19 +311,19 @@ def optimize_cell_shape(self: HalfEdgeMesh, bdry_list=None,
     for key, val in self.faces.items():
         val.dual_coords = new_coord_dict[key]
 
-# %% ../04b_boundary_conditions_jax.ipynb 39
+# %% ../04b_boundary_conditions_jax.ipynb 41
 def excitable_dt_act_pass(Ts, Tps, k=1, m=2, k3=.2):
     """Time derivative of tensions under excitable tension model with constrained area,
     with passive tension for post intercalation. Variant: completely deactivate feedback for m=1.
     k3 is a cutoff in the excitable tension dynamics, for numerical stability at the mesh edges.
     """
-    #dT_dt = (m-1)*((Ts-Tps)**m - k3*(Ts-Tps)**3 - k*Tps)
+    dT_dt = (m-1)*((Ts-Tps)**m - k3*(Ts-Tps)**3 - k*Tps)
     # use relative tension
-    T_mean = Ts.mean()
-    dT_dt = T_mean *((m-1)*(((Ts-Tps)/T_mean)**m - k3*((Ts-Tps)/T_mean)**3 - k*Tps/T_mean ) )
+    #T_mean = Ts.mean()
+    #dT_dt = T_mean *((m-1)*(((Ts-Tps)/T_mean)**m - k3*((Ts-Tps)/T_mean)**3 - k*Tps/T_mean ) )
     
     dTp_dt = -k*Tps
     area_jac = sides_area_jac(Ts-Tps)
-    area_jac /= norm(area_jac)
-    dT_dt -= area_jac * (area_jac@dT_dt)
+    area_jac /= np.linalg.norm(area_jac)
+    dT_dt -= area_jac * (area_jac@dT_dt)    
     return dT_dt, dTp_dt

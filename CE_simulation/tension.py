@@ -201,7 +201,7 @@ def get_energy_fct(self: HalfEdgeMesh, A0=sqrt(3)/4, reg_A=0):
                                + (y[e_lst[0]]-y[e_lst[1]])**2)
             E = 1/2 * anp.sum((lengths-rest_lengths)**2)
             # triangle area penalty
-            A = tri_area(x[tri_lst], y[tri_lst])
+            A = anp.abs(tri_area(x[tri_lst], y[tri_lst]))
             E = E + reg_A/2 * anp.sum((A-A0)**2)
             # displacement from initial center
             E = E + 1/2*((anp.mean(x)-center[0])**2+(anp.mean(y)-center[0]))**2
