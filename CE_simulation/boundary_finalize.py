@@ -147,7 +147,7 @@ def get_E(x0, e_lst_primal, e_dual, cell_list, rest_shapes, bdry_list, valence_m
         
     # add area penalty - actually makes things worse!
     #A0 = jnp.sqrt(3)/2
-    reg_area = 1
+    reg_area = .25
     #E_area = reg_area*jnp.mean((polygon_area(cells)-A0)**4) # no good
     areas = polygon_area(cells)
     E_area = reg_area*jnp.mean((areas-jnp.mean(areas))**2)
