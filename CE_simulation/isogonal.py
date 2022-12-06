@@ -80,25 +80,13 @@ def get_shape_tensor(self: Vertex):
 
 # %% ../03_real_shape_optimization.ipynb 16
 @patch
-def get_shape_energy(self: HalfEdgeMesh, mod_shear=.1, mod_bulk=1):
-    res_dict = {}
-    for v in self.vertices.values():
-        if None in v.get_face_neighbors():
-            res_dict[v._vid] = None
-        else:
-            delta = v.get_shape_tensor()-v.rest_shape
-            res_dict[v._vid] = mod_shear*(delta**2).sum()+mod_bulk*np.trace(delta)**2
-    return res_dict
-
-# %% ../03_real_shape_optimization.ipynb 17
-@patch
 def get_stress_tensor(self: Face):
     verts = np.stack([he.vertices[0].coords for he in self.hes])
     edges = verts - np.roll(verts, 1, axis=0)
     edges = np.stack([-edges[:,1], edges[:,0]])
     return 2/3*np.einsum('ie,je->ij', edges, edges)
 
-# %% ../03_real_shape_optimization.ipynb 20
+# %% ../03_real_shape_optimization.ipynb 19
 def polygon_area(pts):
     """area of polygon assuming no self-intersection. pts.shape (n_vertices, 2)"""
     return anp.sum(pts[:,0]*anp.roll(pts[:,1], 1, axis=0) - anp.roll(pts[:,0], 1, axis=0)*pts[:,1], axis=0)/2
@@ -117,6 +105,20 @@ def get_area(self: Vertex):
     if None in neighbors:
         return None
     return polygon_area(np.stack([fc.dual_coords for fc in neighbors]))
+
+# %% ../03_real_shape_optimization.ipynb 20
+@patch
+def get_shape_energy(self: HalfEdgeMesh, mod_shear=.1, mod_bulk=1, mod_area=0, A0=np.sqrt(3)/2):
+    res_dict = {}
+    for v in self.vertices.values():
+        if None in v.get_face_neighbors():
+            res_dict[v._vid] = None
+        else:
+            delta = v.get_shape_tensor()-v.rest_shape
+            E_shape = mod_shear*(delta**2).sum()+mod_bulk*np.trace(delta)**2
+            E_area = mod_area * (v.get_area()-A0)**2
+            res_dict[v._vid] = E_shape+E_area
+    return res_dict
 
 # %% ../03_real_shape_optimization.ipynb 28
 @patch
