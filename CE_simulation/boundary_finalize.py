@@ -31,6 +31,7 @@ from scipy import linalg
 from tqdm.notebook import tqdm
 
 from copy import deepcopy
+import pickle
 
 from collections import Counter, defaultdict
 
@@ -51,44 +52,7 @@ from jax import grad as jgrad
 from jax import jit
 from jax.tree_util import Partial
 from jax.config import config
+from jax.nn import relu as jrelu
+
 config.update("jax_enable_x64", True) # 32 bit leads the optimizer to complain about precision loss
 #config.update("jax_debug_nans", True)  # useful for debugging, but makes code slower!
-
-# %% ../04c_boundary_conditions_finalize.ipynb 12
-@patch
-def optimize_cell_shape(self: HalfEdgeMesh, bdry_list=None,
-                        energy_args=None, cell_id_to_modulus=None,
-                        tol=1e-3, maxiter=500, verbose=True, bdr_weight=2):
-    """Primal optimization. cell_id_to_modulus: function from _vid to relative elastic modulus"""
-    x0 = self.dual_vertices_to_initial_cond()
-    get_E_arrays, cell_list_vids = self.get_primal_energy_fct_jax(bdry_list)
-
-    if energy_args is None:
-        energy_args = {"mod_bulk": 1, "mod_shear": .2,"angle_penalty": 1000, "bdry_penalty": 100,
-                       "epsilon_l": 1e-4, "A0": jnp.sqrt(3)/2, "mod_area": 0}
-    if cell_id_to_modulus is not None:
-        mod_bulk = energy_args["mod_bulk"]*np.vectorize(cell_id_to_modulus)(cell_list_vids)
-        mod_shear = energy_args["mod_shear"]*np.vectorize(cell_id_to_modulus)(cell_list_vids)
-        mod_area = energy_args["mod_area"]*np.vectorize(cell_id_to_modulus)(cell_list_vids)
-    else:
-        mod_bulk, mod_shear, mod_area = (energy_args["mod_bulk"], energy_args["mod_shear"],
-                                         energy_args["mod_area"])
-    
-    if bdr_weight != 1:
-        is_bdr = np.array([any([fc.is_bdr() for fc in self.vertices[v].get_face_neighbors()])
-                          for v in cell_list_vids])
-        mod_bulk *= (bdr_weight*is_bdr+(1-is_bdr))
-        mod_shear *= (bdr_weight*is_bdr+(1-is_bdr))
-        mod_area *= (bdr_weight*is_bdr+(1-is_bdr))
-
-    
-    cell_shape_args = (mod_bulk, mod_shear, energy_args["angle_penalty"], energy_args["bdry_penalty"],
-                       energy_args["epsilon_l"], energy_args["A0"], energy_args["mod_area"])
-    
-    sol = optimize.minimize(get_E, x0, jac=get_E_jac, args=get_E_arrays+cell_shape_args,
-                             method="CG", tol=tol, options={"maxiter": maxiter})
-    if sol["status"] !=0 and verbose:
-        print("Cell shape optimization failed", sol["message"])
-    new_coord_dict = self.initial_cond_to_dual_vertices(sol["x"])
-    for key, val in self.faces.items():
-        val.dual_coords = new_coord_dict[key]

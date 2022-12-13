@@ -140,7 +140,7 @@ def initial_cond_to_dual_vertices(self: HalfEdgeMesh, x0):
 # %% ../03_real_shape_optimization.ipynb 30
 @patch
 def get_angle_deviation(self: HalfEdgeMesh):
-    """Angle between primal and dual edges. For diagnostics"""
+    """Sin(angle) between primal and dual edges. For diagnostics"""
     angle_deviation = {}
 
     for he in self.hes.values():

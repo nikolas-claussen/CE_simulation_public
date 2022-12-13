@@ -408,6 +408,26 @@ def reset_hes(self: HalfEdgeMesh, face_or_vertex: Union[Face, Vertex]):
 
 # %% ../00_triangle_data_structure.ipynb 72
 @patch
+def get_face_neighbors(self: Vertex):
+    """Get face neighbors of vertex"""
+    neighbors = []
+    start_he = self.incident[0]
+    he = start_he
+    returned = False
+    while not returned:
+        neighbors.append(he.face)
+        he = he.nxt.twin
+        returned = (he == start_he)
+    return neighbors
+
+@patch
+def is_bdry(self: Vertex):
+    """False if the vertex is on the boundar"""
+    return None in self.get_face_neighbors()
+
+
+# %% ../00_triangle_data_structure.ipynb 73
+@patch
 def flip_edge(self: HalfEdgeMesh, e: int):
     """Flip edge of a triangle mesh. Call by using he index
     If the two adjacent faces are not triangles, it does not work!
@@ -417,7 +437,8 @@ def flip_edge(self: HalfEdgeMesh, e: int):
     # by convention, always flip the duplicate
     e = self.hes[e]
     e = e if e.duplicate else e.twin
-    if any([len(v.incident) < 4 for v in e.vertices]):
+    if any([(len(v.incident) == 3) and (not v.is_bdry()) for v in e.vertices]):
+        # v.incident = 3 is ok for boundary vertex.
         raise ValueError('Cannot flip edge of triangular cell')
     if e._faceid is None or e.twin._faceid is None:
         raise ValueError('Cannot flip boundary edge')
@@ -461,7 +482,7 @@ def flip_edge(self: HalfEdgeMesh, e: int):
     
         
 
-# %% ../00_triangle_data_structure.ipynb 84
+# %% ../00_triangle_data_structure.ipynb 85
 @patch
 def is_consistent(self: HalfEdgeMesh):
     """For debugging/testing purposes"""
@@ -486,7 +507,7 @@ def is_consistent(self: HalfEdgeMesh):
     
     return True
 
-# %% ../00_triangle_data_structure.ipynb 90
+# %% ../00_triangle_data_structure.ipynb 91
 @patch
 def is_bdr(self: Face):
     """True if face touches bdr. Check all vertices. Does any have an incident edge with None face?"""
@@ -507,21 +528,6 @@ def get_boundary_faces(msh):
             he = he.prev.twin
         returned = (he == bdr_start)
     return bdr_faces
-
-# %% ../00_triangle_data_structure.ipynb 91
-@patch
-def get_face_neighbors(self: Vertex):
-    """Get face neighbors of vertex"""
-    neighbors = []
-    start_he = self.incident[0]
-    he = start_he
-    returned = False
-    while not returned:
-        neighbors.append(he.face)
-        he = he.nxt.twin
-        returned = (he == start_he)
-    return neighbors
-
 
 # %% ../00_triangle_data_structure.ipynb 93
 @patch

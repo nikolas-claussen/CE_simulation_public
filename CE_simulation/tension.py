@@ -138,7 +138,7 @@ from autograd import grad as agrad
 
 from scipy.sparse import csc_matrix
 
-# %% ../01_tension_time_evolution.ipynb 33
+# %% ../01_tension_time_evolution.ipynb 34
 @patch
 def vertices_to_initial_cond(self: HalfEdgeMesh):
     """Format vertices for use in energy minimization."""
@@ -201,10 +201,13 @@ def get_energy_fct(self: HalfEdgeMesh, A0=sqrt(3)/4, reg_A=0):
                                + (y[e_lst[0]]-y[e_lst[1]])**2)
             E = 1/2 * anp.sum((lengths-rest_lengths)**2)
             # triangle area penalty
-            A = anp.abs(tri_area(x[tri_lst], y[tri_lst]))
+            A = tri_area(x[tri_lst], y[tri_lst])
             #E = E + reg_A/2 * anp.sum((A-A0)**2)
-            
-            E = E + reg_A * anp.sum(1/2 * A**2 + A0**3 * (1/A))
+            A_abs = anp.abs(A)
+            eps_A = .01
+            E = E + reg_A * anp.sum(1/2 * A_abs**2 + A0**3 * (1/(A_abs+eps_A)))
+            # orientation penalty:
+            E = E + 1000 * anp.sum(relu(-A))
             
             # displacement from initial center
             E = E + 1/2*((anp.mean(x)-center[0])**2+(anp.mean(y)-center[0]))**2
@@ -214,7 +217,7 @@ def get_energy_fct(self: HalfEdgeMesh, A0=sqrt(3)/4, reg_A=0):
 # should replace sum by mean -might break stuff, e.g. optimizer tolerances
 # also: might make things scale invariant, e.g. divide by lengths.
 
-# %% ../01_tension_time_evolution.ipynb 77
+# %% ../01_tension_time_evolution.ipynb 78
 def excitable_dt_post(Ts, Tps, k=1, m=2):
     """Time derivative of tensions under excitable tension model with constrained area,
     with passive tension for post intercalation"""
