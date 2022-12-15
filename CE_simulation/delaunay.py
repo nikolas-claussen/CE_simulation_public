@@ -22,15 +22,12 @@ from scipy import spatial
 
 from tqdm.notebook import tqdm
 
-from math import floor, ceil
-
 from copy import deepcopy
 
 # %% ../02_delaunay_simulation.ipynb 5
 import jax.numpy as jnp
 from jax import grad as jgrad
 from jax import jit
-from jax.nn import relu as jrelu
 from jax.tree_util import Partial
 from jax.config import config
 
@@ -74,7 +71,7 @@ def get_triangular_lattice_convex(nx: int, ny: int) -> NDArray[Shape["2,*"],Floa
     
     theta = np.pi/3
     epsilon = 1e-4
-    thr = floor(ny/4)
+    thr = np.floor(ny/4)
     halfplanes = [np.array([np.sin(theta), np.cos(theta)]),
                   np.array([np.sin(-theta), np.cos(-theta)])]
     vals = halfplanes[0].dot(pts)
