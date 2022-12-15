@@ -22,12 +22,12 @@ from jax.nn import relu as jrelu
 
 config.update("jax_enable_x64", True)
 
-from CE_simulation.triangle import *
+from CE_simulation.mesh import *
 from CE_simulation.tension import *
 from CE_simulation.delaunay import *
 from CE_simulation.isogonal import *
 
-from CE_simulation.boundary_jax import get_triangular_lattice, create_rect_mesh, get_centroid,\
+from CE_simulation.boundary_jax import get_triangular_lattice, create_rect_mesh,\
                                        get_bdry, get_conformal_transform, get_areas,\
                                        get_primal_energy_fct_jax, get_E, get_E_jac, polygon_area,\
                                        excitable_dt_act_pass, euler_step, flatten_triangulation_jax,\
@@ -53,7 +53,7 @@ active_ids = []
 max_y = np.max([val.dual_coords[1] for val in mesh_initial.faces.values()])
 w_passive = 8 # 6
 for fc in mesh_initial.faces.values():
-    if fc.is_bdr():  # make a passive edge - let's see if that is necessary
+    if fc.is_bdry():  # make a passive edge - let's see if that is necessary
         passive_ids.append(fc._fid)
     if np.abs(fc.dual_coords[1]) > (max_y-w_passive):
         passive_ids.append(fc._fid)
@@ -152,7 +152,8 @@ meshes = [deepcopy(mesh_initial)]
 times = [0]
 last_flipped_edges = [[]]
 
-## simulation loop
+
+## saving
 
 save = True
 dir_name = "germ_band_very_large_isogonal_no_bdry_script_long_1"
@@ -161,10 +162,28 @@ if save:
         os.mkdir(f"runs/{dir_name}/")
     except FileExistsError:
         print('warning, directory exists')
+
+## reload a mesh. need to reset rest lengths and shapes
+
+fnames  = [x for x in sorted(os.listdir(f'runs/{dir_name}/')) if 'mesh' in x][-10:]
+
+meshes = [load_mesh(f'runs/{dir_name}/{x}') for x in fnames]
+[msh.set_rest_lengths() for msh in meshes];
+
+for msh, fname in zip(meshes, fnames):
+    ix = fname[:4]
+    print(ix)
+    rest_shapes = pickle.load(open(f'runs/{dir_name}/{ix}_rest_shape.p', 'rb'))
+    passive = pickle.load(open(f'runs/{dir_name}/{ix}_passive.p', 'rb'))
+    for key, val in msh.vertices.items():
+        val.rest_shape = rest_shapes[key]
+    for key, val in msh.hes.items():
+        val.passive = passive[key]
+
 ## simulation loop
 
 mesh = deepcopy(meshes[-1])
-for i in range(n_steps):
+for i in range(688, n_steps):
     print(i)
     # euler step
     mesh.euler_step(dt=dt, rhs=excitable_dt_act_pass, params=params_pattern, rhs_rest_shape=rhs_rest_shape)
