@@ -22,6 +22,7 @@ from scipy import optimize
 from tqdm.notebook import tqdm
 
 from copy import deepcopy
+import pickle
 
 # %% ../04_drosophila_simulation.ipynb 5
 from typing import Union, Dict, List, Tuple, Iterable, Callable, Any
