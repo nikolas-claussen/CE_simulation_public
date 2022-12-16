@@ -2,7 +2,8 @@
 
 # %% auto 0
 __all__ = ['rot_mat', 'shear_mat', 'scale_mat', 'get_triangular_lattice_convex', 'get_tri_hemesh', 'get_triangular_lattice',
-           'create_rect_mesh', 'create_rect_mesh_angle', 'get_inertia', 'get_conformal_transform']
+           'create_rect_mesh', 'create_rect_mesh_angle', 'get_inertia', 'scatter_hist', 'eqspace',
+           'get_conformal_transform']
 
 # %% ../02_delaunay_simulation.ipynb 3
 import CE_simulation.mesh as msh
@@ -234,12 +235,61 @@ def get_vertex_angles(self: msh.HalfEdgeMesh, method: Literal["real", "dual"]="r
     if method == "real":
         angles = []
         for fc in self.faces.values():
-            if (not (fc._fid in exclude)) and (not fc.is_bdr()):
+            if (not (fc._fid in exclude)) and (not fc.is_bdry()):
                 vecs = np.stack([he.twin.face.dual_coords-fc.dual_coords for he in fc.hes])
                 angle = [np.pi-tns.vectors_angle(x, y) for x,y in zip(vecs, np.roll(vecs, 1, axis=0))]
                 angles[fc._fid] = np.array(angle)
     
     return angles
+
+# %% ../02_delaunay_simulation.ipynb 21
+def scatter_hist(x, y, bins, fig=None, ticks_off=True, vmin=None, vmax=None):
+    """
+    Create a square 2d histogram with marginals at top & right sides. Returns main mpl axis.
+    
+    Parameters
+    ----------
+    x, y: np.array of shape (n_sample,)
+        Sample points
+    bins: tuple (np.array, np.array) 
+        Histogram bins
+    ticks_off: bool
+        turn off ticks on the auxilliary marginal axes
+    vmin, vmax: float
+        Limits of color map
+    
+    Returns
+    -------
+    ax: matplotlib axis
+    
+    """
+    
+    fig = plt.figure(figsize=(4,4)) if fig is None else fig
+    # create the required axes
+    gs = fig.add_gridspec(2, 2,  width_ratios=(7, 2), height_ratios=(2, 7),
+                          left=0.1, right=0.9, bottom=0.1, top=0.9, wspace=0.1, hspace=0.1)
+    ax = fig.add_subplot(gs[1, 0])
+    ax_histx, ax_histy = (fig.add_subplot(gs[0, 0], sharex=ax), fig.add_subplot(gs[1, 1], sharey=ax))
+
+    # no labels on marginal axes
+    ax_histx.tick_params(axis="x", labelbottom=False)
+    ax_histy.tick_params(axis="y", labelleft=False)
+
+    if ticks_off:
+        ax_histx.set_yticks([],[])
+        ax_histy.set_xticks([],[])
+
+    # the scatter plot:
+    ax.hist2d(x, y, bins=bins, density=True, cmap="magma", vmin=vmin, vmax=vmax)
+
+    ax_histx.hist(x, bins=bins[0], alpha=.5, density=True)
+    ax_histy.hist(y, bins=bins[1], orientation='horizontal', alpha=.5, density=True)
+    
+    return ax
+    
+def eqspace(x0: float, x1: float, dx: float) -> NDArray[Shape["*"], Float]:
+    """Return equally spaced range between x0, x1, with approx. spacing dx. Cf. np.linspace."""
+    return np.linspace(x0, x1, np.round(abs(x1-x0)/dx).astype(int))
 
 # %% ../02_delaunay_simulation.ipynb 25
 def get_conformal_transform(mesh1: msh.HalfEdgeMesh, mesh2: msh.HalfEdgeMesh) -> callable:
