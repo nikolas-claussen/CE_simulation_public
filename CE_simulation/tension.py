@@ -2,7 +2,8 @@
 
 # %% auto 0
 __all__ = ['get_E_dual_jac', 'vectors_angle', 'sides_area', 'sides_circum', 'sides_angles', 'angles_shape', 'sides_area_jac',
-           'excitable_dt', 'polygon_area', 'polygon_perimeter', 'get_E_dual', 'excitable_dt_act_pass']
+           'excitable_dt', 'TensionHalfEdge', 'TensionHalfEdgeMesh', 'polygon_area', 'polygon_perimeter', 'get_E_dual',
+           'excitable_dt_act_pass']
 
 # %% ../01_tension_time_evolution.ipynb 3
 import CE_simulation.mesh as msh
@@ -19,7 +20,8 @@ from scipy import linalg, optimize
 from tqdm.notebook import tqdm
 
 import sys
-from copy import deepcopy
+from copy import deepcopy, copy
+import pickle
 
 # %% ../01_tension_time_evolution.ipynb 5
 from dataclasses import dataclass
@@ -27,6 +29,8 @@ from typing import Union, Dict, List, Tuple, Iterable, Any
 from nptyping import NDArray, Int, Float, Shape
 
 from fastcore.foundation import patch
+
+import functools
 
 # %% ../01_tension_time_evolution.ipynb 7
 # basic formulas for triangles
@@ -103,9 +107,105 @@ def excitable_dt(Ts: NDArray[Shape["3"],Float], m=2) -> float:
     dT_dt -= area_jac * (area_jac@dT_dt)
     return dT_dt
 
-# %% ../01_tension_time_evolution.ipynb 28
+# %% ../01_tension_time_evolution.ipynb 22
+@dataclass
+class TensionHalfEdge(msh.HalfEdge):
+    """Half edge with attributes storing total and active tension.""" 
+    rest: Union[float, None] = None
+    passive: float = 0.0
+
+    def __repr__(self):
+        repr_str = super().__repr__()
+        repr_str = repr_str.replace('HalfEdge', 'TensionHalfEdge')
+        if self.rest is not None and self.passive is not None:
+            repr_str += f", rest={round(self.rest, ndigits=1)}, passive={round(self.passive, ndigits=1)}"
+        return repr_str
+    
+    def unwrap(self, in_place=True):
+        """Cast to HalfEdge base class."""
+        he = self if in_place else copy(self)
+        he.__class__ = msh.HalfEdge
+        del he.rest
+        del he.passive
+        if not in_place:
+            return the
+        
+    
 @patch
-def vertices_to_initial_cond(self: msh.HalfEdgeMesh) -> NDArray[Shape["*"],Float]:
+def wrap_as_TensionHalfEdge(self: msh.HalfEdge, rest=None, passive=0.0, in_place=True
+                           ) -> Union[None, TensionHalfEdge]:
+    """
+    In-place/copy upcast from HalfEdge to TensionHalfEdge.
+    
+    Internal, for use in TensionHalfEdgeMesh.__init__.
+    """
+    the = self if in_place else copy(self)
+    the.__class__ = TensionHalfEdge
+    the.rest = rest
+    the.passive = passive
+    if not in_place:
+        return the
+
+# %% ../01_tension_time_evolution.ipynb 24
+class TensionHalfEdgeMesh(msh.HalfEdgeMesh):
+    """
+    HalfEdgeMesh with methods for active triangulation dynamics.
+    
+    Can be instantiated from a HalfEdgeMesh, or from the more basal ListOfVerticesAndFaces.
+    """
+    def __new__(cls, mesh: Union[msh.HalfEdgeMesh, None]= None):
+        if isinstance(mesh, msh.HalfEdgeMesh):
+            mesh = deepcopy(mesh)
+            mesh.__class__ = cls
+            return mesh
+        else:
+            return super().__new__(cls)
+    def __init__(self, mesh: Union[msh.ListOfVerticesAndFaces, msh.HalfEdgeMesh]):
+        if isinstance(mesh, msh.ListOfVerticesAndFaces):
+            super().__init__(mesh)
+        for he in self.hes.values():
+            he.wrap_as_TensionHalfEdge(in_place=True)
+            
+    def save_mesh(self, fname: str, save_rest_passive=False) -> None:
+        super().save_mesh(fname)
+        if save_rest_passive:
+            pickle.dump({key: val.rest for key, val in self.hes.items()}, open(f"{fname}_rest.p", "wb"))
+            pickle.dump({key: val.passive for key, val in self.hes.items()}, open(f"{fname}_passive.p", "wb"))
+    save_mesh.__doc__ = (msh.HalfEdgeMesh.save_mesh.__doc__
+                         +'\n Can also pickle passive&rest attributes as dicts at fname_{rest/passive}.p')
+    
+    def unwrap(self):
+        """In-place cast to HalfEdgeMesh base class."""
+        self.__class__ = msh.HalfEdgeMesh
+        for he in self.hes.values():
+            he.unwrap(in_place=True)
+    
+    @staticmethod
+    def load_mesh(fname: str, load_rest_passive=False):
+        """
+        Load from file as saved by mesh.save_mesh.
+        
+        Can load rest/passive attributes of half edges, if saved as pickled dicts at fname_{rest/passive}.p
+        """
+        mesh = TensionHalfEdgeMesh(super(TensionHalfEdgeMesh, TensionHalfEdgeMesh).load_mesh(fname))
+        if load_rest_passive:
+            rest_dict = pickle.load(open(f'{fname}_rest.p', 'rb'))
+            passive_dict = pickle.load(open(f'{fname}_passive.p', 'rb'))
+            for key, he in mesh.hes.items():
+                he.rest = rest_dict[key]
+                he.passive = passive_dict[key]
+        return mesh
+
+# %% ../01_tension_time_evolution.ipynb 30
+@patch
+def set_rest_lengths(self: TensionHalfEdgeMesh) -> None:
+    """Set the triangulation rest lengths to current lengths"""
+    for key, val in self.get_edge_lens().items():
+        self.hes[key].rest = val
+
+# %% ../01_tension_time_evolution.ipynb 38
+@patch
+def vertices_to_initial_cond(self: TensionHalfEdgeMesh) -> NDArray[Shape["*"],Float]:
     """
     Format vertex coordinates for use in energy minimization. 
     1st n_vertices/2 entries of vector are the x-, 2nd n_vertices/2 entries the y-coords.    
@@ -115,14 +215,14 @@ def vertices_to_initial_cond(self: msh.HalfEdgeMesh) -> NDArray[Shape["*"],Float
     return np.hstack([vertex_vector[0], vertex_vector[1]])
        
 @patch
-def initial_cond_to_vertices(self: msh.HalfEdgeMesh, x0) -> Dict[int, NDArray[Shape["2"],Float]]:
+def initial_cond_to_vertices(self: TensionHalfEdgeMesh, x0) -> Dict[int, NDArray[Shape["2"],Float]]:
     """Reverse of vertices_to_initial_cond - format output of energy minimization as dict."""
     vertex_keys = sorted(self.vertices.keys())
     x, y = (x0[:int(len(x0)/2)], x0[int(len(x0)/2):])
     vertex_vector = np.stack([x, y], axis=1)
     return {key: val for key, val in zip(vertex_keys, vertex_vector)}
 
-# %% ../01_tension_time_evolution.ipynb 30
+# %% ../01_tension_time_evolution.ipynb 40
 import jax.numpy as jnp
 from jax import grad as jgrad
 from jax import jit
@@ -132,7 +232,7 @@ from jax.config import config
 
 config.update("jax_enable_x64", True) 
 
-# %% ../01_tension_time_evolution.ipynb 31
+# %% ../01_tension_time_evolution.ipynb 41
 @jit
 def polygon_area(pts: NDArray[Shape["*,2,..."], Float]) -> NDArray[Shape["2,..."], Float]:
     """JAX-compatible - area of polygon. Assuming no self-intersection. Pts.shape (n_vertices, 2)"""
@@ -143,9 +243,9 @@ def polygon_perimeter(pts: NDArray[Shape["*,2,..."], Float]) -> NDArray[Shape["2
     """JAX-compatible - perimeter of polygon. Assuming no self-intersection. pts.shape (n_vertices, 2)"""
     return jnp.sum(jnp.linalg.norm(pts-jnp.roll(pts, 1, axis=0), axis=1), axis=0)
 
-# %% ../01_tension_time_evolution.ipynb 32
+# %% ../01_tension_time_evolution.ipynb 42
 @patch
-def get_dual_energy_fct_jax(self: msh.HalfEdgeMesh):
+def get_dual_energy_fct_jax(self: TensionHalfEdgeMesh):
     """
     JAX-compatible - Get arrays for triangulation flattening.
     
@@ -161,8 +261,6 @@ def get_dual_energy_fct_jax(self: msh.HalfEdgeMesh):
         Rest lengths of each edge
     tri_lst : (n_triangles, 3) array
         Indices to the serialized vertex positions defining tr iangles in triangulation
-    n_vertices : int
-        Number of vertices
     """
     e_lst = []
     tri_lst = []
@@ -183,13 +281,13 @@ def get_dual_energy_fct_jax(self: msh.HalfEdgeMesh):
     tri_lst = jnp.array(tri_lst).T
     n_vertices = len(self.vertices)
     
-    return e_lst, rest_lengths, tri_lst, n_vertices
+    return e_lst, rest_lengths, tri_lst
 
-# %% ../01_tension_time_evolution.ipynb 33
-@Partial(jit, static_argnums=(4,))
+# %% ../01_tension_time_evolution.ipynb 43
+@jit
 def get_E_dual(x0: NDArray[Shape["*"],Float], e_lst: NDArray[Shape["*, 2"],Float],
                rest_lengths: NDArray[Shape["*"],Float], tri_lst: NDArray[Shape["*, 3"],Float],
-               n_vertices: int, mod_area=0.01, A0=jnp.sqrt(3)/4) -> float:
+               mod_area=0.01, A0=jnp.sqrt(3)/4) -> float:
     """
     Dual energy function for triangulation flattening
     
@@ -219,6 +317,7 @@ def get_E_dual(x0: NDArray[Shape["*"],Float], e_lst: NDArray[Shape["*, 2"],Float
         elastic energy
     
     """
+    n_vertices = int(x0.shape[0]/2)
     pts = jnp.stack([x0[:n_vertices], x0[n_vertices:]], axis=1)
     lengths = jnp.linalg.norm(pts[e_lst[0]]-pts[e_lst[1]], axis=1)
     
@@ -231,12 +330,12 @@ def get_E_dual(x0: NDArray[Shape["*"],Float], e_lst: NDArray[Shape["*, 2"],Float
     
     return E_length + E_area
   
-get_E_dual_jac = jit(jgrad(get_E_dual), static_argnums=(4,))
+get_E_dual_jac = jit(jgrad(get_E_dual))
 # static_argnums is required since n_vertices is used to slice the input array - else, jit fails.
 
-# %% ../01_tension_time_evolution.ipynb 39
+# %% ../01_tension_time_evolution.ipynb 49
 @patch
-def flatten_triangulation(self: msh.HalfEdgeMesh, tol=1e-4, verbose=True, mod_area=0.01, A0=jnp.sqrt(3)/4,
+def flatten_triangulation(self: TensionHalfEdgeMesh, tol=1e-4, verbose=True, mod_area=0.01, A0=jnp.sqrt(3)/4,
                           reset_intrinsic=True, return_sol=False) -> Union[None, Dict]:
     """
     Flatten triangulation - optimize vertex positions to match intrinsic lengths.
@@ -284,9 +383,9 @@ def flatten_triangulation(self: msh.HalfEdgeMesh, tol=1e-4, verbose=True, mod_ar
     if return_sol:
         return sol
 
-# %% ../01_tension_time_evolution.ipynb 56
+# %% ../01_tension_time_evolution.ipynb 67
 @patch
-def get_angles(self: msh.HalfEdgeMesh) -> Dict[int, float]:
+def get_angles(self: TensionHalfEdgeMesh) -> Dict[int, float]:
     """Get the angle opposite to each half edge in the mesh."""
     angle_dict = {}
     egde_lengths = self.get_edge_lens()
@@ -298,14 +397,14 @@ def get_angles(self: msh.HalfEdgeMesh) -> Dict[int, float]:
     return angle_dict
 
 @patch
-def get_double_angles(self: msh.HalfEdgeMesh) -> Dict[int, float]:
+def get_double_angles(self: TensionHalfEdgeMesh) -> Dict[int, float]:
     """Get the sum of the opposite angles of an edge (2x half edge) in mesh, e.g. for Delaunay criterion."""
     angles = self.get_angles()
     double_angles = {he._heid: (angles[he._heid]+angles[he._twinid]) for he in self.hes.values()
                              if (he.face is not None) and (he.twin.face is not None)}
     return double_angles
 
-# %% ../01_tension_time_evolution.ipynb 59
+# %% ../01_tension_time_evolution.ipynb 70
 def excitable_dt_act_pass(Ts: NDArray[Shape["3"], Float], Tps: NDArray[Shape["3"], Float], k=1, m=2, k_cutoff=0,
                           ) -> Tuple[NDArray[Shape["3"],Float],NDArray[Shape["3"],Float]]:
     """
@@ -353,9 +452,9 @@ def excitable_dt_act_pass(Ts: NDArray[Shape["3"], Float], Tps: NDArray[Shape["3"
     dT_dt -= area_jac * (area_jac@dT_dt)    
     return dT_dt, dTp_dt
 
-# %% ../01_tension_time_evolution.ipynb 60
+# %% ../01_tension_time_evolution.ipynb 71
 @patch
-def reset_rest_passive_flip(self: msh.HalfEdgeMesh, e: msh.HalfEdge, method="smooth") -> None:
+def reset_rest_passive_flip(self: TensionHalfEdgeMesh, e: TensionHalfEdge, method="smooth") -> None:
     """
     Reset rest length and passive tensions of flipped he according to myosin handover.
     
@@ -376,9 +475,9 @@ def reset_rest_passive_flip(self: msh.HalfEdgeMesh, e: msh.HalfEdge, method="smo
     else:
         print("method must be smooth or direct")
 
-# %% ../01_tension_time_evolution.ipynb 61
+# %% ../01_tension_time_evolution.ipynb 72
 @patch
-def euler_step(self: msh.HalfEdgeMesh, dt=.005, rhs_tension=excitable_dt_act_pass, params=None,
+def euler_step(self: TensionHalfEdgeMesh, dt=.005, rhs_tension=excitable_dt_act_pass, params=None,
                rhs_rest_shape: Union[None, callable]=None) -> None:
     """
     Euler step intrinsic edge length and reference shapes. 

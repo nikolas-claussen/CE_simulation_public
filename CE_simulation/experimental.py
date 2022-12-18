@@ -83,7 +83,8 @@ def create_rect_initial(nx, ny, noise=0, initial_strain=0, isogonal=0, orientati
     # create the mesh
     if orientation == 'parallel':
         nx, ny = (ny, nx)
-    mesh_initial = dln.create_rect_mesh(ny, nx, noise=noise, defects=(0, 0), straight_bdry=False)
+    mesh_initial = iso.CellHalfEdgeMesh(dln.create_rect_mesh(ny, nx, noise=noise, defects=(0, 0),
+                                                             straight_bdry=False))
     if orientation == 'orthogonal':
         mesh_initial.transform_vertices(dln.rot_mat(np.pi/2))
     center = np.mean([v.coords for v in mesh_initial.vertices.values()], axis=0)
