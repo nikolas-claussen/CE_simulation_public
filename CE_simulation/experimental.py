@@ -188,5 +188,3 @@ def get_p_over_sqrt_A(v: msh.Vertex) -> float:
         return None
     cell = np.stack([fc.dual_coords for fc in v.get_face_neighbors()])
     return tns.polygon_perimeter(cell) / np.sqrt(tns.polygon_area(cell))
-
-get_p_over_sqrt_A(meshes[10].vertices[70])

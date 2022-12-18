@@ -49,8 +49,8 @@ from matplotlib import animation, rc
 # %% ../03_real_shape_optimization.ipynb 10
 @dataclass
 class CellVertex(msh.Vertex):
-    """Vertex with attributes for primal shape optimization.""" 
-    rest_shape: NDArray[Shape["2, 2"],Float] = np.array([[1.0, 0.0], [0.0, 1.0]])
+    """Vertex with attributes for primal shape optimization: rest_shape, 2x2 matrix of reference shape.""" 
+    rest_shape = np.array([[1.0, 0.0], [0.0, 1.0]])
     
     def __repr__(self):
         return super().__repr__().replace('Vertex', 'CellVertex')
@@ -128,7 +128,7 @@ class CellHalfEdgeMesh(tns.TensionHalfEdgeMesh):
                 he.passive = passive_dict[key]
         return mesh
 
-# %% ../03_real_shape_optimization.ipynb 18
+# %% ../03_real_shape_optimization.ipynb 17
 def get_shape_tensor(poly: NDArray[Shape["*,2,..."],Float], epsilon_l=1e-4) -> NDArray[Shape["2,2,..."],Float]:
     """
     Compute shape tensor from polygon vertex coords.
@@ -170,7 +170,7 @@ def set_rest_shapes(self: CellHalfEdgeMesh) -> None:
     for v in self.vertices.values():
         v.rest_shape = v.get_vrtx_shape_tensor()
 
-# %% ../03_real_shape_optimization.ipynb 22
+# %% ../03_real_shape_optimization.ipynb 21
 def get_shape_energy(poly: NDArray[Shape["*,2"],Float],
                      rest_shape: NDArray[Shape["2,2"],Float]=jnp.eye(2), A0=jnp.sqrt(3)/2,
                      mod_shear=.5, mod_bulk=1, mod_area=0) -> float:
@@ -225,7 +225,7 @@ def get_shape_energies(self: CellHalfEdgeMesh, mod_shear=.5, mod_bulk=1, mod_are
                                                 mod_shear=mod_shear, mod_bulk=mod_bulk, mod_area=mod_area)
     return res_dict
 
-# %% ../03_real_shape_optimization.ipynb 25
+# %% ../03_real_shape_optimization.ipynb 24
 @patch
 def dual_vertices_to_initial_cond(self: CellHalfEdgeMesh) -> NDArray[Shape["*"],Float]:
     """
@@ -252,7 +252,7 @@ def initial_cond_to_dual_vertices(self: CellHalfEdgeMesh, x0: NDArray[Shape["*"]
     return {key: val for key, val in zip(face_keys, dual_vertex_vector)}
 
 
-# %% ../03_real_shape_optimization.ipynb 28
+# %% ../03_real_shape_optimization.ipynb 27
 @patch
 def get_primal_energy_fct_jax(self: CellHalfEdgeMesh, bdry_list=None):
     """
@@ -349,7 +349,7 @@ def get_primal_energy_fct_jax(self: CellHalfEdgeMesh, bdry_list=None):
     
     return (e_lst_primal, e_dual, cell_list, rest_shapes, bdry_list, valence_mask), np.array(cell_list_vids)
 
-# %% ../03_real_shape_optimization.ipynb 30
+# %% ../03_real_shape_optimization.ipynb 29
 @jit
 def get_E(x0, e_lst_primal, e_dual, cell_list, rest_shapes, bdry_list, valence_mask,
           mod_bulk=1, mod_shear=.5, angle_penalty=1000, bdry_penalty=1000, epsilon_l=1e-3,
@@ -431,7 +431,7 @@ def get_E(x0, e_lst_primal, e_dual, cell_list, rest_shapes, bdry_list, valence_m
 
 get_E_jac = jit(jgrad(get_E))
 
-# %% ../03_real_shape_optimization.ipynb 44
+# %% ../03_real_shape_optimization.ipynb 43
 @patch
 def optimize_cell_shape(self: CellHalfEdgeMesh, bdry_list=None,
                         energy_args=None, cell_id_to_modulus=None,
@@ -511,7 +511,7 @@ def optimize_cell_shape(self: CellHalfEdgeMesh, bdry_list=None,
     for key, val in self.faces.items():
         val.dual_coords = new_coord_dict[key]
 
-# %% ../03_real_shape_optimization.ipynb 50
+# %% ../03_real_shape_optimization.ipynb 49
 def rotate_about_center(x: NDArray[Shape["*,2"],Float], angle=np.pi/2):
     """
     Rotate points about center of mass. x.shape = (n_pts, 2).
@@ -521,7 +521,7 @@ def rotate_about_center(x: NDArray[Shape["*,2"],Float], angle=np.pi/2):
     center = np.mean(x, axis=0)
     return (x-center)@dln.rot_mat(angle)+center
 
-# %% ../03_real_shape_optimization.ipynb 51
+# %% ../03_real_shape_optimization.ipynb 50
 @patch
 def get_flip_edge(self: CellHalfEdgeMesh, minimal_l: float, exclude: List[int]) -> Union[int, None]:
     """
@@ -536,7 +536,7 @@ def get_flip_edge(self: CellHalfEdgeMesh, minimal_l: float, exclude: List[int]) 
         return primal_lengths[0][0]
     return None
 
-# %% ../03_real_shape_optimization.ipynb 52
+# %% ../03_real_shape_optimization.ipynb 51
 @patch
 def intercalate(self: CellHalfEdgeMesh, exclude: List[int], minimal_l: float,
                 reoptimize=True, optimizer_args=None) -> Tuple[List, List]:
