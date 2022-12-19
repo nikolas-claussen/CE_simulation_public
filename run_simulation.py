@@ -30,25 +30,27 @@ config.update("jax_debug_nans", False) # useful for debugging, but makes code sl
 
 ## set save directory
 
-save_dir = 'runs/test_script/'
+save_dir = 'runs/script_large/'
 try:
     os.mkdir(save_dir)
 except FileExistsError:
     print('warning: save directory exists')
     
 ## copy script to the save directory as a way to keep track of paremters
+
 copied_script_name = time.strftime("%Y-%m-%d_%H%M") + '_' + os.path.basename(__file__)
 shutil.copy(__file__, save_dir + os.sep + copied_script_name)
 
 ## create mesh
 
-mesh_initial, bdry_list, property_dict = drs.create_rect_initial(14, 20, noise=0.1, initial_strain=0.15,
-                                                                 orientation='orthogonal', isogonal=.1,
-                                                                 boundaries=['top', 'bottom'],
-                                                                 w_passive=4)
+mesh_initial, bdry_list, property_dict = drs.create_rect_initial(28, 40, noise=0.1, initial_strain=0.75,
+                                                                 orientation='orthogonal', isogonal=.2,
+                                                                 boundaries=None, # ['top', 'bottom']
+                                                                 w_passive=3)
 mesh_initial.save_mesh(f"{save_dir}/initial_mesh", save_attribs=True)
 
 ## plot intial condition for reference
+
 edge_colors = {key: "tab:grey" for key in property_dict['passive_edges']}
 cell_alpha = .5
 cell_colors = {key: np.hstack([drs.fridtjof_colors[val % drs.fridtjof_colors.shape[0]], [cell_alpha]])
@@ -78,7 +80,7 @@ def params_pattern(fid):
 params_no_pattern = {"k": k, "m": m, "k_cutoff": k_cutoff}
     
 dt = .001 # time step
-n_steps = 10
+n_steps = 1500
 forbid_reflip = 20
 minimal_l = .075 # minimal edge length, lower edge lengths trigger T1
 
@@ -90,7 +92,7 @@ tol, maxiter = (1e-4, 10000)
 mod_bulk = 1
 mod_shear = .5
 angle_penalty = 1000
-bdry_penalty = 5000
+bdry_penalty = 0 #5000
 
 epsilon_l = 1e-3
 
@@ -107,15 +109,16 @@ use_voronoi = False # don't do shape optimization, run voronoi instead
 
 ### rest shape relaxation
 
-k_rest = 4
+k_rest = 2
 def rhs_rest_shape(v):
     """Rest shape relaxation but do not relax area, i.e. trace. Also, only relax passive cells"""
-    if v._vid in property_dict['passive_cells']:
-        delta = v.rest_shape-v.get_vrtx_shape_tensor()
-        return -k_rest*(delta - np.trace(delta)/2 * np.eye(2))
-    else:
-        return 0
-
+    #if v._vid in property_dict['passive_cells']:
+    #    delta = v.rest_shape-v.get_vrtx_shape_tensor()
+    #    return -k_rest*(delta - np.trace(delta)/2 * np.eye(2))
+    #else:
+    #    return 0
+    return -k_rest * (v.rest_shape - np.sqrt(3)*np.eye(2))
+    
 ### package all into a single dict to pass to the optimizer method
 
 energy_args = {"mod_bulk": mod_bulk, "mod_shear": mod_shear,

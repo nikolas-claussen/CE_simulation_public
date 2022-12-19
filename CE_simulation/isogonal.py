@@ -600,7 +600,7 @@ def intercalate(self: CellHalfEdgeMesh, exclude: List[int], minimal_l: float,
         except ValueError:
             failed_flip.append(flip_edge)
             exclude.append(flip_edge)
-            flip_edge = mesh.get_flip_edge(minimal_l, exclude)
+            flip_edge = self.get_flip_edge(minimal_l, exclude)
             continue
 
     return flipped, failed_flip

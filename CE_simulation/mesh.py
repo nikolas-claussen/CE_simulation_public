@@ -684,11 +684,11 @@ def cellplot(self: HalfEdgeMesh, alpha=1, set_lims=False, edge_colors=None, cell
                             for fc in primal_face_list], max_depth=1))
     
     #fig, ax = plt.subplots()
-    plt.gca().add_collection(LineCollection(lines, colors=colors, alpha=alpha))
     if cell_colors is not None:
         plt.gca().add_collection(LineCollection(cells, facecolors=facecolors,
                                                 colors=(0,0,0,0)))
-    
+    plt.gca().add_collection(LineCollection(lines, colors=colors, alpha=alpha))
+
     if set_lims:
         plt.gca().set_xlim([pts[:,0].min(), pts[:,0].max()])
         plt.gca().set_ylim([pts[:,1].min(), pts[:,1].max()])
