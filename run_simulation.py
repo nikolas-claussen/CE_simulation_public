@@ -30,7 +30,7 @@ config.update("jax_debug_nans", False) # useful for debugging, but makes code sl
 
 ## set save directory
 
-save_dir = 'runs/script_large/'
+save_dir = 'runs/script_large_high_tri_reg/'
 try:
     os.mkdir(save_dir)
 except FileExistsError:
@@ -43,10 +43,10 @@ shutil.copy(__file__, save_dir + os.sep + copied_script_name)
 
 ## create mesh
 
-mesh_initial, bdry_list, property_dict = drs.create_rect_initial(28, 40, noise=0.1, initial_strain=0.75,
+mesh_initial, bdry_list, property_dict = drs.create_rect_initial(28, 40, noise=0.1, initial_strain=0.08,
                                                                  orientation='orthogonal', isogonal=.2,
                                                                  boundaries=None, # ['top', 'bottom']
-                                                                 w_passive=3)
+                                                                 w_passive=3, random_seed=3)
 mesh_initial.save_mesh(f"{save_dir}/initial_mesh", save_attribs=True)
 
 ## plot intial condition for reference
@@ -69,7 +69,7 @@ plt.savefig(f"{save_dir}/initial_cond.pdf")
 
 m = 4
 k = .5
-k_cutoff = .1 # regularization term
+k_cutoff = .3 # regularization term, 0.25
  
 passive_ids = property_dict['passive_faces']
 def params_pattern(fid):
@@ -81,14 +81,14 @@ params_no_pattern = {"k": k, "m": m, "k_cutoff": k_cutoff}
     
 dt = .001 # time step
 n_steps = 1500
-forbid_reflip = 20
+forbid_reflip = 50
 minimal_l = .075 # minimal edge length, lower edge lengths trigger T1
 
-tri_mod_area = .01 # triangle area regularization
+tri_mod_area = .025 # triangle area regularization, 0.01
 
 ### cell shape parameters
 
-tol, maxiter = (1e-4, 10000)
+tol, maxiter = (1e-4, 50000)
 mod_bulk = 1
 mod_shear = .5
 angle_penalty = 1000
@@ -132,7 +132,7 @@ optimizer_args = {'bdry_list': bdry_list, 'energy_args': energy_args, 'cell_id_t
 
 # note that we don't keep a list of all meshes, because that can consume a lot of memory for long simulations
 
-print_T1s = False
+print_T1s = True
 
 times = [0]
 last_flipped_edges = [[]]

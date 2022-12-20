@@ -150,7 +150,7 @@ def create_rect_initial(nx, ny, noise=0, initial_strain=0, isogonal=0, orientati
             if (v.get_centroid()[0] < -(max_x_cells-w_bdry)) and (not v.is_bdry()):
                 left_ids.append(v._vid)
         def left_penalty(x):
-            return (x[1]+bdry_x)**2
+            return (x[0]+bdry_x)**2
         left_penalty = Partial(jit(left_penalty))
         bdry_list.append([left_penalty, left_ids])
 
@@ -160,7 +160,7 @@ def create_rect_initial(nx, ny, noise=0, initial_strain=0, isogonal=0, orientati
             if (v.get_centroid()[0] > (max_x_cells-w_bdry)) and (not v.is_bdry()):
                 right_ids.append(v._vid)
         def right_penalty(x):
-            return (x[1]-bdry_x)**2
+            return (x[0]-bdry_x)**2
         right_penalty = Partial(jit(right_penalty))
         bdry_list.append([right_penalty, right_ids])
 
