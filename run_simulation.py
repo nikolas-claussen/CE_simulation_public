@@ -154,7 +154,10 @@ for i in tqdm(range(0, n_steps)):
     flipped, failed_flip = mesh.intercalate(exclude=list(msh.flatten(last_flipped_edges[-forbid_reflip:])),
                                             minimal_l=minimal_l, reoptimize=True, optimizer_args=optimizer_args)
     if print_T1s:
-        print(f"tpt {i}: flip {flipped}, failed {failed_flip}")
+	    if failed_flip
+            print(f"tpt {i}: flip {flipped}, failed {failed_flip}")
+	    else:
+            print(f"tpt {i}: flip {flipped}")
     # rescale & reorient triangulation
     mesh.transform_vertices(dln.get_conformal_transform(mesh_previous, mesh))
     # log & save

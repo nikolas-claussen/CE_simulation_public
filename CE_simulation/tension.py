@@ -205,21 +205,28 @@ def set_rest_lengths(self: TensionHalfEdgeMesh) -> None:
 
 # %% ../01_tension_time_evolution.ipynb 38
 @patch
-def vertices_to_initial_cond(self: TensionHalfEdgeMesh) -> NDArray[Shape["*"],Float]:
+def vector_to_vertices(self: TensionHalfEdgeMesh, flattened=True) -> NDArray[Shape["*"],Float]:
     """
-    Format vertex coordinates for use in energy minimization. 
-    1st n_vertices/2 entries of vector are the x-, 2nd n_vertices/2 entries the y-coords.    
+    Format vertex coordinates for use in energy minimization.  
+    
+    If flattened, 1st n_vertices/2 entries of vector are the x-, 2nd n_vertices/2 entries the y-coords.
+    Else, return n_vertices * 2 array
     """
     vertex_keys = sorted(self.vertices.keys())
-    vertex_vector = np.stack([self.vertices[key].coords for key in vertex_keys]).T
-    return np.hstack([vertex_vector[0], vertex_vector[1]])
+    vertex_vector = np.stack([self.vertices[key].coords for key in vertex_keys])
+    if flattened:
+        return np.hstack([vertex_vector[:0], vertex_vector[:1]])
+    return vertex_vector
        
 @patch
-def initial_cond_to_vertices(self: TensionHalfEdgeMesh, x0) -> Dict[int, NDArray[Shape["2"],Float]]:
-    """Reverse of vertices_to_initial_cond - format output of energy minimization as dict."""
+def vertices_to_vector(self: TensionHalfEdgeMesh, x0, flattened=True) -> Dict[int, NDArray[Shape["2"],Float]]:
+    """Reverse of vector_to_vertices - format output of energy minimization as dict."""
     vertex_keys = sorted(self.vertices.keys())
-    x, y = (x0[:int(len(x0)/2)], x0[int(len(x0)/2):])
-    vertex_vector = np.stack([x, y], axis=1)
+    if flattened:
+        x, y = (x0[:int(len(x0)/2)], x0[int(len(x0)/2):])
+        vertex_vector = np.stack([x, y], axis=1)
+    else:
+        vertex_vector = x0
     return {key: val for key, val in zip(vertex_keys, vertex_vector)}
 
 # %% ../01_tension_time_evolution.ipynb 40
@@ -303,7 +310,7 @@ def get_E_dual(x0: NDArray[Shape["*"],Float], e_lst: NDArray[Shape["*, 2"],Float
     Parameters
     ----------
     x0: (2*n_vertices,) array
-        Vertex position vector as created by HalfEdgeMesh.vertices_to_initial_cond.
+        Vertex position vector as created by HalfEdgeMesh.vector_to_vertices.
     e_lst, rest_lengths, tri_lst: arrays
         Created by HalfEdgeMesh.get_dual_energy_fct_jax
     mod_area: float
@@ -342,7 +349,7 @@ def flatten_triangulation(self: TensionHalfEdgeMesh, tol=1e-4, verbose=True, mod
     
     This wrapper does the following:
     1) Serialize a HalfEdgeMesh into arrays using HalfEdgeMesh.get_dual_energy_fct_jax
-    and HalfEdgeMesh.vertices_to_initial_cond
+    and HalfEdgeMesh.vector_to_vertices
     2) Optimize the dual energy function get_E_dual using conjugate gradient implemented
     by scipy.optimize.minimize
     3) De-serialize the result and update the vertex positions
@@ -368,14 +375,14 @@ def flatten_triangulation(self: TensionHalfEdgeMesh, tol=1e-4, verbose=True, mod
         Return optimizer result dict
     """
     energy_arrays = self.get_dual_energy_fct_jax()
-    x0 = self.vertices_to_initial_cond()
+    x0 = self.vector_to_vertices()
     sol = optimize.minimize(get_E_dual, x0, method="CG", jac=get_E_dual_jac, tol=tol, # CG, BFGS
                             args=energy_arrays+(mod_area, A0))
     sol['initial_fun'] = float(get_E_dual(x0, *(energy_arrays+(mod_area, A0))))
     if sol["status"] !=0 and verbose:
         print("Triangulation optimization failed")
         print(sol["message"])
-    new_coord_dict = self.initial_cond_to_vertices(sol["x"])
+    new_coord_dict = self.vertices_to_vector(sol["x"])
     for key, val in self.vertices.items():
         val.coords = new_coord_dict[key]
     if reset_intrinsic:
@@ -445,7 +452,7 @@ def excitable_dt_act_pass(Ts: NDArray[Shape["3"], Float], Tps: NDArray[Shape["3"
 
 
     """
-    dT_dt = (m-1)*((Ts-Tps)**m - k_cutoff*(Ts-Tps)**(m+1) - k*Tps) - k*(m==1) * (Ts-1)    
+    dT_dt = (m!=1)*((Ts-Tps)**m - k_cutoff*(Ts-Tps)**(m+1) - k*Tps) - k*(m==1)*(Ts-1)    
     dTp_dt = -k*Tps
     area_jac = sides_area_jac(Ts-Tps)
     area_jac /= np.linalg.norm(area_jac)
