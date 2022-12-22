@@ -76,11 +76,14 @@ def get_isogonal(self: msh.Vertex) -> Dict[int, NDArray[Shape["2"], Float]]:
 
 # %% ../06_isogonal_hessian.ipynb 17
 @patch
-def get_isogonal_transform_matrix(self: msh.HalfEdgeMesh) -> NDArray[Shape["*,*,2"], Float]:
+def get_isogonal_transform_matrix(self: msh.HalfEdgeMesh, flattened=False) -> NDArray[Shape["*,*,2"], Float]:
     """
     Create a matrix that transforms isogonal modes to vertex displacement
     
     To do the basis conversion, order vertices (cells) and faces (cell vertices) according to their indices.
+    
+    If flattened, flatten by combining face & x/y-component index
+    
     """    
     face_key_dict = {key: ix for ix, key in enumerate(sorted(self.faces.keys()))}
     vertex_key_dict = {key: ix for ix, key in enumerate(sorted(self.faces.keys()))}
@@ -91,10 +94,11 @@ def get_isogonal_transform_matrix(self: msh.HalfEdgeMesh) -> NDArray[Shape["*,*,
     for vkey, iso_dict in iso_dicts.items():
         for fkey, dr in iso_dict.items():
             iso_matrix[vertex_key_dict[vkey], face_key_dict[fkey], :] = dr
-    
+    if flattened:
+        return iso_matrix.reshape((iso_matrix.shape[0], iso_matrix.shape[1]*iso_matrix.shape[2]))
     return iso_matrix
 
-# %% ../06_isogonal_hessian.ipynb 26
+# %% ../06_isogonal_hessian.ipynb 27
 @jit
 def get_E_iso(x0, e_lst_primal, e_dual, cell_list, bdry_list, valence_mask,
               mod_bulk=0, mod_shear=0, shape0=jnp.sqrt(3)*jnp.eye(2),
@@ -140,9 +144,7 @@ def get_E_iso(x0, e_lst_primal, e_dual, cell_list, bdry_list, valence_mask,
         Elastic energy + angle & boundary condition penalties
     
     """
-    n_faces = int(x0.shape[0]/2)
-    x, y = (x0[:n_faces], x0[n_faces:])
-    pts = jnp.stack([x, y], axis=-1)
+    pts = jnp.reshape(x0, (int(x0.shape[0]/2), 2))
     cells = jnp.stack([pts[i] for i in cell_list.T], axis=0)
     
     # area+perimeter elasticity
@@ -178,7 +180,7 @@ def get_E_iso(x0, e_lst_primal, e_dual, cell_list, bdry_list, valence_mask,
 get_E_iso_jac = jit(jax.grad(get_E_iso))
 get_E_iso_hessian = jit(jax.hessian(get_E_iso))
 
-# %% ../06_isogonal_hessian.ipynb 27
+# %% ../06_isogonal_hessian.ipynb 28
 @patch
 def get_iso_energy_fct_jax(self: iso.CellHalfEdgeMesh, bdry_list=None):
     """Get the relevant subset of serialization arrays"""
@@ -186,7 +188,7 @@ def get_iso_energy_fct_jax(self: iso.CellHalfEdgeMesh, bdry_list=None):
     return e_lst_primal, e_dual, cell_list, bdry_list, valence_mask
 
 
-# %% ../06_isogonal_hessian.ipynb 28
+# %% ../06_isogonal_hessian.ipynb 29
 @patch
 def optimize_cell_shape(self: iso.CellHalfEdgeMesh, bdry_list=None,
                         energy_args=None, tol=1e-3, maxiter=10000, verbose=True) -> Dict:

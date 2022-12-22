@@ -205,7 +205,7 @@ def set_rest_lengths(self: TensionHalfEdgeMesh) -> None:
 
 # %% ../01_tension_time_evolution.ipynb 38
 @patch
-def vector_to_vertices(self: TensionHalfEdgeMesh, flattened=True) -> NDArray[Shape["*"],Float]:
+def vertices_to_vector(self: TensionHalfEdgeMesh, flattened=True) -> NDArray[Shape["*"],Float]:
     """
     Format vertex coordinates for use in energy minimization.  
     
@@ -215,16 +215,15 @@ def vector_to_vertices(self: TensionHalfEdgeMesh, flattened=True) -> NDArray[Sha
     vertex_keys = sorted(self.vertices.keys())
     vertex_vector = np.stack([self.vertices[key].coords for key in vertex_keys])
     if flattened:
-        return np.hstack([vertex_vector[:0], vertex_vector[:1]])
+        return vertex_vector.reshape(2*vertex_vector.shape[0])
     return vertex_vector
        
 @patch
-def vertices_to_vector(self: TensionHalfEdgeMesh, x0, flattened=True) -> Dict[int, NDArray[Shape["2"],Float]]:
-    """Reverse of vector_to_vertices - format output of energy minimization as dict."""
+def vector_to_vertices(self: TensionHalfEdgeMesh, x0, flattened=True) -> Dict[int, NDArray[Shape["2"],Float]]:
+    """Reverse of vertices_to_vector - format output of energy minimization as dict."""
     vertex_keys = sorted(self.vertices.keys())
     if flattened:
-        x, y = (x0[:int(len(x0)/2)], x0[int(len(x0)/2):])
-        vertex_vector = np.stack([x, y], axis=1)
+        vertex_vector = x0.reshape((int(x0.shape[0]/2), 2))
     else:
         vertex_vector = x0
     return {key: val for key, val in zip(vertex_keys, vertex_vector)}
@@ -324,10 +323,9 @@ def get_E_dual(x0: NDArray[Shape["*"],Float], e_lst: NDArray[Shape["*, 2"],Float
         elastic energy
     
     """
-    n_vertices = int(x0.shape[0]/2)
-    pts = jnp.stack([x0[:n_vertices], x0[n_vertices:]], axis=1)
-    lengths = jnp.linalg.norm(pts[e_lst[0]]-pts[e_lst[1]], axis=1)
+    pts = x0.reshape((int(x0.shape[0]/2), 2))
     
+    lengths = jnp.linalg.norm(pts[e_lst[0]]-pts[e_lst[1]], axis=1)
     E_length = 1/2 * jnp.sum((lengths-rest_lengths)**2)
     # triangle area penalty
     A = polygon_area(pts[tri_lst].transpose((0,2,1)))
