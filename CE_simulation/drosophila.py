@@ -200,7 +200,7 @@ def create_rect_initial(nx, ny, noise=0, initial_strain=0, isogonal=0, orientati
     
     return mesh_initial, bdry_list, property_dict
 
-# %% ../04_drosophila_simulation.ipynb 35
+# %% ../04_drosophila_simulation.ipynb 36
 def plot_mesh(i, xlim, ylim, mesh_series, flipped_series=None,
               edge_colors=None, cell_colors=None, slipwall_y=None, plot_cell=True, plot_tri=False):
     ''"""
@@ -253,7 +253,7 @@ def plot_mesh(i, xlim, ylim, mesh_series, flipped_series=None,
             line = np.stack([he.vertices[0].coords, he.vertices[1].coords])
             plt.plot(*line.T, c="tab:purple", lw=5)
 
-# %% ../04_drosophila_simulation.ipynb 54
+# %% ../04_drosophila_simulation.ipynb 55
 def get_p_over_sqrt_A(v: msh.Vertex) -> float:
     """Compute perimeter/sqrt(area) of cell. Returns None for boundary cells."""
     if v.is_bdry():

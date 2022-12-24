@@ -258,7 +258,7 @@ def vector_to_primal_vertices(self: CellHalfEdgeMesh, x0: NDArray[Shape["*"],Flo
 
 # %% ../03_real_shape_optimization.ipynb 29
 @patch
-def get_primal_energy_fct_jax(self: CellHalfEdgeMesh, bdry_list=None):
+def get_primal_energy_fct_jax(self: CellHalfEdgeMesh, bdry_list=None, normalize_e_dual=True):
     """
     Get arrays to compute primal energy from primal vertices in JAX-compatible way.
     
@@ -275,6 +275,10 @@ def get_primal_energy_fct_jax(self: CellHalfEdgeMesh, bdry_list=None):
     ----------
     bdry_list: [(penalty function, vertex ids),]
         List of boundaries. None = no boundaries.
+    normalize_e_dual: bool
+        Normalize the dual edges. Use False if you want to compute the "proper" tension energy
+        E = \sum_e T_e l_e. By default, True - used for computing a tension-insensitive
+        angle penalty.
         
     Returns
     -------
@@ -342,7 +346,8 @@ def get_primal_energy_fct_jax(self: CellHalfEdgeMesh, bdry_list=None):
             dual_edge = he.vertices[1].coords-he.vertices[0].coords
             # rotate by 90 degrees
             dual_edge = jnp.array([dual_edge[1], -dual_edge[0]])
-            dual_edge = dual_edge / np.linalg.norm(dual_edge)
+            if normalize_e_dual:
+                dual_edge = dual_edge / np.linalg.norm(dual_edge)
             primal_edge = [face_key_dict[fc._fid] for fc in [he.face, he.twin.face]] # 0= he, 1= twin
             e_dual.append(dual_edge)
             e_lst_primal.append(primal_edge)
@@ -351,10 +356,10 @@ def get_primal_energy_fct_jax(self: CellHalfEdgeMesh, bdry_list=None):
     
     return (e_lst_primal, e_dual, cell_list, rest_shapes, bdry_list, valence_mask), np.array(cell_list_vids)
 
-# %% ../03_real_shape_optimization.ipynb 31
+# %% ../03_real_shape_optimization.ipynb 32
 @jit
 def get_E(x0, e_lst_primal, e_dual, cell_list, rest_shapes, bdry_list, valence_mask,
-          mod_bulk=1, mod_shear=.5, angle_penalty=1000, bdry_penalty=1000, epsilon_l=1e-3,
+          mod_bulk=1, mod_shear=.5, angle_penalty=1000, bdry_penalty=1000, epsilon_l=(1e-3, 1e-3),
           A0=jnp.sqrt(3)/2, mod_area=0):
     """
     Compute shape-tensor based cell elastic energy with angle & boundary constraint penalties.
@@ -385,8 +390,10 @@ def get_E(x0, e_lst_primal, e_dual, cell_list, rest_shapes, bdry_list, valence_m
         Shape tensor shear modulus
     angle_penalty, bdry_penalty: float
         Penalties enforcing area and boundary constraints
-    epsilon_l: float
-        Regularization for short-length edges, required for differentiability
+    epsilon_l: tuple (float, float)
+        Regularization for short-length edges, required for differentiability.
+        The 0st entry is the regularization for the shape energy,
+        and the 1st the one for the angle penalty
     A0, mod_area: float
         Reference area and area elastic modulus, can be added to shape tensor energy.
     
@@ -401,7 +408,7 @@ def get_E(x0, e_lst_primal, e_dual, cell_list, rest_shapes, bdry_list, valence_m
     # face-based shape energy
     cells = jnp.stack([pts[i] for i in cell_list.T], axis=0)
     edges = cells - jnp.roll(cells, 1, axis=0)
-    lengths = jnp.sqrt(jnp.sum(edges**2, axis=-1)+epsilon_l**2)
+    lengths = jnp.sqrt(jnp.sum(edges**2, axis=-1)+epsilon_l[0]**2)
     # + epsilon**2 to avoid non-differentiable sqrt at 0-length edges (occurs due to padding)
     units = (edges.T/lengths.T).T
     tensors = jnp.einsum('efi,efj->fij', edges, units)
@@ -411,7 +418,7 @@ def get_E(x0, e_lst_primal, e_dual, cell_list, rest_shapes, bdry_list, valence_m
 
     # angle penalty
     e_primal = pts[e_lst_primal[:,1],:] - pts[e_lst_primal[:,0],:] # he.twin.face-he.face
-    lengths = jnp.sqrt(jnp.sum(e_primal**2, axis=-1)+epsilon_l**2)
+    lengths = jnp.sqrt(jnp.sum(e_primal**2, axis=-1)+epsilon_l[1]**2)
     # + epsilon to avoid 0-division error and make penalty smooth as length passes through 0
     E_angle = angle_penalty*jnp.mean(1-jnp.einsum('ei,ei->e', e_primal, e_dual)/lengths)
     # note: non-zero epsilon creates a "penalty" against 0-length edges because 
@@ -432,7 +439,7 @@ def get_E(x0, e_lst_primal, e_dual, cell_list, rest_shapes, bdry_list, valence_m
 
 get_E_jac = jit(jgrad(get_E))
 
-# %% ../03_real_shape_optimization.ipynb 45
+# %% ../03_real_shape_optimization.ipynb 46
 @patch
 def optimize_cell_shape(self: CellHalfEdgeMesh, bdry_list=None,
                         energy_args=None, cell_id_to_modulus=None,
@@ -482,16 +489,19 @@ def optimize_cell_shape(self: CellHalfEdgeMesh, bdry_list=None,
     x0 = self.primal_vertices_to_vector()
     get_E_arrays, cell_list_vids = self.get_primal_energy_fct_jax(bdry_list)
 
-    if energy_args is None:
-        energy_args = {"mod_bulk": 1, "mod_shear": .5, "angle_penalty": 1000, "bdry_penalty": 100,
-                       "epsilon_l": 1e-4, "A0": jnp.sqrt(3)/2, "mod_area": 0}
+    # set default values
+    default_args = {"mod_bulk": 0, "mod_shear": 0, "angle_penalty": 1000, "bdry_penalty": 5000,
+                    "epsilon_l": (1e-4, 1e-4), "A0": jnp.sqrt(3)/2, "mod_area": 0}
+    combined = {} if energy_args is None else deepcopy(energy_args)
+    for key, val in default_args.items():
+        if key not in combined:
+            combined[key] = val
     if cell_id_to_modulus is not None:
-        mod_bulk = energy_args["mod_bulk"]*np.vectorize(cell_id_to_modulus)(cell_list_vids)
-        mod_shear = energy_args["mod_shear"]*np.vectorize(cell_id_to_modulus)(cell_list_vids)
-        mod_area = energy_args["mod_area"]*np.vectorize(cell_id_to_modulus)(cell_list_vids)
+        mod_bulk = combined["mod_bulk"]*np.vectorize(cell_id_to_modulus)(cell_list_vids)
+        mod_shear = combined["mod_shear"]*np.vectorize(cell_id_to_modulus)(cell_list_vids)
+        mod_area = combined["mod_area"]*np.vectorize(cell_id_to_modulus)(cell_list_vids)
     else:
-        mod_bulk, mod_shear, mod_area = (energy_args["mod_bulk"], energy_args["mod_shear"],
-                                         energy_args["mod_area"])
+        mod_bulk, mod_shear, mod_area = (combined["mod_bulk"], combined["mod_shear"], combined["mod_area"])
     
     if bdr_weight != 1:
         is_bdr = np.array([any([fc.is_bdry() for fc in self.vertices[v].get_face_neighbors()])
@@ -500,9 +510,8 @@ def optimize_cell_shape(self: CellHalfEdgeMesh, bdry_list=None,
         mod_shear *= (bdr_weight*is_bdr+(1-is_bdr))
         mod_area *= (bdr_weight*is_bdr+(1-is_bdr))
 
-    
-    cell_shape_args = (mod_bulk, mod_shear, energy_args["angle_penalty"], energy_args["bdry_penalty"],
-                       energy_args["epsilon_l"], energy_args["A0"], energy_args["mod_area"])
+    cell_shape_args = (mod_bulk, mod_shear, combined["angle_penalty"], combined["bdry_penalty"],
+                       combined["epsilon_l"], combined["A0"], mod_area)
     
     sol = optimize.minimize(get_E, x0, jac=get_E_jac, args=get_E_arrays+cell_shape_args,
                              method="CG", tol=tol, options={"maxiter": maxiter})
@@ -512,7 +521,7 @@ def optimize_cell_shape(self: CellHalfEdgeMesh, bdry_list=None,
     for key, val in self.faces.items():
         val.dual_coords = new_coord_dict[key]
 
-# %% ../03_real_shape_optimization.ipynb 51
+# %% ../03_real_shape_optimization.ipynb 52
 def rotate_about_center(x: NDArray[Shape["*,2"],Float], angle=np.pi/2):
     """
     Rotate points about center of mass. x.shape = (n_pts, 2).
@@ -522,7 +531,7 @@ def rotate_about_center(x: NDArray[Shape["*,2"],Float], angle=np.pi/2):
     center = np.mean(x, axis=0)
     return (x-center)@dln.rot_mat(angle)+center
 
-# %% ../03_real_shape_optimization.ipynb 52
+# %% ../03_real_shape_optimization.ipynb 53
 @patch
 def get_flip_edge(self: CellHalfEdgeMesh, minimal_l: float, exclude: List[int]) -> Union[int, None]:
     """
@@ -537,7 +546,7 @@ def get_flip_edge(self: CellHalfEdgeMesh, minimal_l: float, exclude: List[int]) 
         return primal_lengths[0][0]
     return None
 
-# %% ../03_real_shape_optimization.ipynb 53
+# %% ../03_real_shape_optimization.ipynb 54
 @patch
 def intercalate(self: CellHalfEdgeMesh, exclude: List[int], minimal_l: float,
                 reoptimize=True, optimizer_args=None) -> Tuple[List, List]:

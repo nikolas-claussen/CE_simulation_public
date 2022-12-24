@@ -233,11 +233,11 @@ def optimize_cell_shape(self: iso.CellHalfEdgeMesh, bdry_list=None,
     for key, val in default_args.items():
         if key not in combined:
             combined[key] = val
-    args_list = (combined[key] for key in ['mod_bulk', 'mod_shear', 'shape0', 'mod_area', 'A0',
+    args_list = tuple(combined[key] for key in ['mod_bulk', 'mod_shear', 'shape0', 'mod_area', 'A0',
                                            'mod_perimeter', 'P0', 'angle_penalty', 'bdry_penalty', 'epsilon_l'])
     
     # optimize
-    sol = optimize.minimize(get_E, x0, jac=get_E_jac, args=get_E_arrays+args_list,
+    sol = optimize.minimize(get_E_iso, x0, jac=get_E_iso_jac, args=get_E_arrays+args_list,
                              method="CG", tol=tol, options={"maxiter": maxiter})
     
     if sol["status"] !=0 and verbose:
@@ -247,6 +247,6 @@ def optimize_cell_shape(self: iso.CellHalfEdgeMesh, bdry_list=None,
         val.dual_coords = new_coord_dict[key]
     return sol
 
-# %% ../06_isogonal_hessian.ipynb 45
+# %% ../06_isogonal_hessian.ipynb 52
 def top_q_share(x, q=.9):
     return np.round(x[x > np.quantile(x, q)].sum() / x.sum(), decimals=2)

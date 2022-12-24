@@ -373,14 +373,14 @@ def flatten_triangulation(self: TensionHalfEdgeMesh, tol=1e-4, verbose=True, mod
         Return optimizer result dict
     """
     energy_arrays = self.get_dual_energy_fct_jax()
-    x0 = self.vector_to_vertices()
+    x0 = self.vertices_to_vector()
     sol = optimize.minimize(get_E_dual, x0, method="CG", jac=get_E_dual_jac, tol=tol, # CG, BFGS
                             args=energy_arrays+(mod_area, A0))
     sol['initial_fun'] = float(get_E_dual(x0, *(energy_arrays+(mod_area, A0))))
     if sol["status"] !=0 and verbose:
         print("Triangulation optimization failed")
         print(sol["message"])
-    new_coord_dict = self.vertices_to_vector(sol["x"])
+    new_coord_dict = self.vector_to_vertices(sol["x"])
     for key, val in self.vertices.items():
         val.coords = new_coord_dict[key]
     if reset_intrinsic:
