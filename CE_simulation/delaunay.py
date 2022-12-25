@@ -236,7 +236,7 @@ def get_vertex_angles(self: msh.HalfEdgeMesh, method: Literal["real", "dual"]="r
         angles = []
         for fc in self.faces.values():
             if (not (fc._fid in exclude)) and (not fc.is_bdry()):
-                vecs = np.stack([he.twin.face.dual_coords-fc.dual_coords for he in fc.hes])
+                vecs = np.stack([he.twin.face.primal_coords-fc.primal_coords for he in fc.hes])
                 angle = [np.pi-tns.vectors_angle(x, y) for x,y in zip(vecs, np.roll(vecs, 1, axis=0))]
                 angles[fc._fid] = np.array(angle)
     

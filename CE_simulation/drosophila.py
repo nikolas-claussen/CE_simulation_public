@@ -164,16 +164,18 @@ def create_rect_initial(nx, ny, noise=0, initial_strain=0, isogonal=0, orientati
         right_penalty = Partial(jit(right_penalty))
         bdry_list.append([right_penalty, right_ids])
 
+    mesh_initial.bdry_list = bdry_list
+        
     # set the active and passive triangles
     passive_faces = []
-    max_y_faces = np.max([val.dual_coords[1] for val in mesh_initial.faces.values()])
+    max_y_faces = np.max([val.primal_coords[1] for val in mesh_initial.faces.values()])
     for fc in mesh_initial.faces.values():
-        if fc.is_bdry() or (np.abs(fc.dual_coords[1]) > (max_y_faces-w_passive)):
+        if fc.is_bdry() or (np.abs(fc.primal_coords[1]) > (max_y_faces-w_passive)):
             passive_faces.append(fc._fid)
     passive_faces = sorted(passive_faces)
     passive_edges = msh.flatten([[he._heid for he in mesh_initial.faces[fc].hes] for fc in passive_faces])
     passive_cells = [v._vid for v in mesh_initial.vertices.values()
-                     if not v.is_bdry() and any([fc._fid in passive_faces for fc in v.get_face_neighbors()])]
+                     if not v.is_bdry() and any([fc._fid in passive_faces for fc in v.faces])]
 
     # create dict of initial row ids
     if orientation == 'parallel':
@@ -198,7 +200,7 @@ def create_rect_initial(nx, ny, noise=0, initial_strain=0, isogonal=0, orientati
                      'passive_edges': passive_edges, 'passive_cells': passive_cells,
                      'bdry_x': bdry_x, 'bdry_y': bdry_y}
     
-    return mesh_initial, bdry_list, property_dict
+    return mesh_initial, property_dict
 
 # %% ../04_drosophila_simulation.ipynb 36
 def plot_mesh(i, xlim, ylim, mesh_series, flipped_series=None,
@@ -247,7 +249,7 @@ def plot_mesh(i, xlim, ylim, mesh_series, flipped_series=None,
     for x in flipped_series[i+1]:
         he = meshes[i].hes[x]
         if plot_cell:
-            line = np.stack([he.face.dual_coords, he.twin.face.dual_coords])
+            line = np.stack([he.face.primal_coords, he.twin.face.primal_coords])
             plt.plot(*line.T, c="r", lw=4)
         if plot_tri:
             line = np.stack([he.vertices[0].coords, he.vertices[1].coords])
@@ -258,5 +260,4 @@ def get_p_over_sqrt_A(v: msh.Vertex) -> float:
     """Compute perimeter/sqrt(area) of cell. Returns None for boundary cells."""
     if v.is_bdry():
         return None
-    cell = np.stack([fc.dual_coords for fc in v.get_face_neighbors()])
-    return tns.polygon_perimeter(cell) / np.sqrt(tns.polygon_area(cell))
+    return tns.polygon_perimeter(v.primal_coords) / np.sqrt(tns.polygon_area(v.primal_coords))

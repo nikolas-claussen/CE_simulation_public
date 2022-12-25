@@ -71,8 +71,16 @@ The code is organized as follows:
 
 - `04_drosophila_simulation` contains a complete simulation of an
   idealized *Drosophila* germ band. `04a` is a copy of `04`, to be used
-  as playground. There is also a sample script to run a simulation from
-  a terminal.
+  as playground.
+
+  - There is also a sample script to run a simulation from a terminal
+    based on notebook `04`, `run_simulation.py`.
+
+- `05_periodic_bcs`, TO BE DONE - periodic boundary conditions
+
+- `06_isogonal_hessian` studies the projection of cell elastic energy
+  onto the space of isogonal modes and contains tools to compute & apply
+  isogonal transformations.
 
 The code is written in object-oriented style - the central class being
 the

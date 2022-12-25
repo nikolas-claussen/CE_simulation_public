@@ -43,7 +43,7 @@ shutil.copy(__file__, save_dir + os.sep + copied_script_name)
 
 ## create mesh
 
-mesh_initial, bdry_list, property_dict = drs.create_rect_initial(28, 40, noise=0.1, initial_strain=0.08,
+mesh_initial, bdry_list, property_dict = drs.create_rect_initial(18, 20, noise=0.1, initial_strain=0.08,
                                                                  orientation='orthogonal', isogonal=.2,
                                                                  boundaries=None, # ['top', 'bottom']
                                                                  w_passive=3, random_seed=3)
@@ -80,7 +80,7 @@ def params_pattern(fid):
 params_no_pattern = {"k": k, "m": m, "k_cutoff": k_cutoff}
     
 dt = .001 # time step
-n_steps = 1500
+n_steps = 10
 forbid_reflip = 50
 minimal_l = .075 # minimal edge length, lower edge lengths trigger T1
 
@@ -98,6 +98,8 @@ epsilon_l = 1e-3
 
 A0 = jnp.sqrt(3)/2
 mod_area = 0
+P0 = 2*jnp.sqrt(3)/2
+mod_perimeter = 0
 
 bdr_weight = 2
 
@@ -123,10 +125,9 @@ def rhs_rest_shape(v):
 
 energy_args = {"mod_bulk": mod_bulk, "mod_shear": mod_shear,
                "angle_penalty": angle_penalty, "bdry_penalty": bdry_penalty, "epsilon_l": epsilon_l,
-               "A0": A0, "mod_area": mod_area}
-optimizer_args = {'bdry_list': bdry_list, 'energy_args': energy_args, 'cell_id_to_modulus': cell_id_to_modulus,
+               "A0": A0, "mod_area": mod_area, "P0": P0, "mod_perimeter": mod_perimeter}
+optimizer_args = {'energy_args': energy_args, 'cell_id_to_modulus': cell_id_to_modulus,
                   'tol': tol, 'maxiter': maxiter, 'verbose': True, 'bdr_weight': bdr_weight}
-
 
 ## simulation loop
 
@@ -154,9 +155,9 @@ for i in tqdm(range(0, n_steps)):
     flipped, failed_flip = mesh.intercalate(exclude=list(msh.flatten(last_flipped_edges[-forbid_reflip:])),
                                             minimal_l=minimal_l, reoptimize=True, optimizer_args=optimizer_args)
     if print_T1s:
-	    if failed_flip
+        if failed_flip:
             print(f"tpt {i}: flip {flipped}, failed {failed_flip}")
-	    else:
+        if flipped and not failed_flip:
             print(f"tpt {i}: flip {flipped}")
     # rescale & reorient triangulation
     mesh.transform_vertices(dln.get_conformal_transform(mesh_previous, mesh))
