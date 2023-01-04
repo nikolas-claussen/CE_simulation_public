@@ -116,9 +116,9 @@ def get_isogonal_trafo(mesh: msh.HalfEdgeMesh, mesh_ref=None) -> Dict[int, float
     return mesh.vector_to_vertices(theta_lstsq)
     
 
-# %% ../06_isogonal_hessian.ipynb 38
+# %% ../06_isogonal_hessian.ipynb 37
 get_E_hessian = jit(jax.hessian(iso.get_E))
 
-# %% ../06_isogonal_hessian.ipynb 56
+# %% ../06_isogonal_hessian.ipynb 55
 def top_q_share(x, q=.9):
     return np.round(x[x > np.quantile(x, q)].sum() / x.sum(), decimals=2)

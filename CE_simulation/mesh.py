@@ -5,7 +5,7 @@ __all__ = ['flatten', 'sort_vertices', 'sort_ids_by_vertices', 'get_neighbors', 
            'HalfEdge', 'Vertex', 'Face', 'get_half_edges', 'HalfEdgeMesh', 'get_test_hemesh', 'get_test_mesh_large',
            'get_test_hemesh_large', 'get_circumcenter', 'is_convex_polygon', 'polygon_area', 'load_mesh']
 
-# %% ../00_triangle_data_structure.ipynb 3
+# %% ../00_triangle_data_structure.ipynb 4
 import os
 import numpy as np
 import matplotlib.pyplot as plt
@@ -14,20 +14,20 @@ from matplotlib.collections import LineCollection
 
 from scipy import spatial
 
-# %% ../00_triangle_data_structure.ipynb 4
+# %% ../00_triangle_data_structure.ipynb 5
 from collections import defaultdict
 
-# %% ../00_triangle_data_structure.ipynb 5
+# %% ../00_triangle_data_structure.ipynb 6
 from dataclasses import dataclass, field
 from typing import Union, Dict, List, Tuple, Iterable, Callable
 from nptyping import NDArray, Int, Float, Shape
 
 from fastcore.foundation import patch, patch_to
 
-# %% ../00_triangle_data_structure.ipynb 7
+# %% ../00_triangle_data_structure.ipynb 8
 from bisect import bisect_left
 
-# %% ../00_triangle_data_structure.ipynb 9
+# %% ../00_triangle_data_structure.ipynb 10
 def flatten(lst, max_depth=1000, iter_count=0):
     """
     Flatten a list of lists into a list.
@@ -58,7 +58,7 @@ def flatten(lst, max_depth=1000, iter_count=0):
         else:
             yield el
 
-# %% ../00_triangle_data_structure.ipynb 10
+# %% ../00_triangle_data_structure.ipynb 11
 def sort_vertices(vertices: np.ndarray) -> np.ndarray:
     """Sort vertices of cycle counter clockwise by polar angle. Guaranteed to work for non-convex polygons."""
     vertices -= np.mean(vertices, axis=0) # center
@@ -71,7 +71,7 @@ def sort_ids_by_vertices(ids: Iterable[int], vertices: Iterable[NDArray]) -> lis
     phis = [np.arctan2(*x[::-1]) for x in vertices]
     return [x for _, x in sorted(zip(phis, ids))]
 
-# %% ../00_triangle_data_structure.ipynb 18
+# %% ../00_triangle_data_structure.ipynb 19
 def get_neighbors(faces: Dict) -> Dict:
     """Compute neighbor list by checking which triangles share 2 vertices."""
     edge_dict = defaultdict(list)
@@ -86,7 +86,7 @@ def get_neighbors(faces: Dict) -> Dict:
             neighbors[fcs[1]].append(fcs[0])
     return neighbors
 
-# %% ../00_triangle_data_structure.ipynb 19
+# %% ../00_triangle_data_structure.ipynb 20
 class ListOfVerticesAndFaces:
     """
     Simplest data structure for a triangulation, comprises:
@@ -152,14 +152,14 @@ class ListOfVerticesAndFaces:
             faces = {fcid: fc for fcid, fc in zip(face_ids, faces)}
         return ListOfVerticesAndFaces(vertices, faces)
 
-# %% ../00_triangle_data_structure.ipynb 20
+# %% ../00_triangle_data_structure.ipynb 21
 def get_test_mesh():
     """Create 4 vertex test mesh"""
     points = np.array([[0, 0], [0, 1.1], [1, 0], [1, 1]])
     tri = spatial.Delaunay(points)
     return ListOfVerticesAndFaces(tri.points, tri.simplices)
 
-# %% ../00_triangle_data_structure.ipynb 28
+# %% ../00_triangle_data_structure.ipynb 29
 @patch
 def save_obj(self:ListOfVerticesAndFaces, fname, save_ids=False):
     """save as obj file. .obj automatically appended to fname. If save_ids is True, also save a list
@@ -199,7 +199,7 @@ def save_obj(self:ListOfVerticesAndFaces, fname, save_ids=False):
                 f.write('f '+str(key)+'\n')
 
 
-# %% ../00_triangle_data_structure.ipynb 38
+# %% ../00_triangle_data_structure.ipynb 39
 @dataclass
 class HalfEdge:
     """Attribute holder class for half edges. Attributes point to other items, property methods get them."""
@@ -291,7 +291,7 @@ class Face:
     def coords(self):
         return np.stack([x.coords for x in self.vertices])
 
-# %% ../00_triangle_data_structure.ipynb 44
+# %% ../00_triangle_data_structure.ipynb 45
 def get_half_edges(mesh: ListOfVerticesAndFaces) -> Dict[int, HalfEdge]:
     """Create list of half-edges from a ListOfVerticesAndFaces mesh"""
     heid_counter = 0
@@ -330,7 +330,7 @@ def get_half_edges(mesh: ListOfVerticesAndFaces) -> Dict[int, HalfEdge]:
     # turn into dict for easy access
     return {he._heid: he for he in hes}
 
-# %% ../00_triangle_data_structure.ipynb 47
+# %% ../00_triangle_data_structure.ipynb 48
 @patch
 def reset_hes(self: Face) -> None:
     """Re-create the full list of half edges belonging to a face or vertex based on its first half edge."""
@@ -362,7 +362,7 @@ def reset_hes(self: Vertex) -> None:
         returned = (he == start_he)
     self.incident = new_hes
 
-# %% ../00_triangle_data_structure.ipynb 49
+# %% ../00_triangle_data_structure.ipynb 50
 class HalfEdgeMesh:
     def __init__(self, mesh : ListOfVerticesAndFaces):
         hes = get_half_edges(mesh)
@@ -388,11 +388,11 @@ class HalfEdgeMesh:
     def fromObj(fname):
         return HalfEdgeMesh(ListOfVerticesAndFaces.fromObj(fname))
 
-# %% ../00_triangle_data_structure.ipynb 50
+# %% ../00_triangle_data_structure.ipynb 51
 def get_test_hemesh():
     return HalfEdgeMesh(get_test_mesh())
 
-# %% ../00_triangle_data_structure.ipynb 65
+# %% ../00_triangle_data_structure.ipynb 66
 def get_test_mesh_large(x=np.linspace(0, 1, 25), y=np.linspace(0, 1, 50),
                         noise=.0025) -> ListOfVerticesAndFaces:
     pts = np.stack(np.meshgrid(x, y))
@@ -410,7 +410,7 @@ def get_test_mesh_large(x=np.linspace(0, 1, 25), y=np.linspace(0, 1, 50),
 def get_test_hemesh_large(x=np.linspace(0, 1, 25), y=np.linspace(0, 1, 50), noise=.0025) -> HalfEdgeMesh:
     return HalfEdgeMesh(get_test_mesh_large(x=x, y=y, noise=noise))
 
-# %% ../00_triangle_data_structure.ipynb 73
+# %% ../00_triangle_data_structure.ipynb 74
 @patch
 def is_bdry(self: HalfEdge) -> bool:
     """True if the HalfEdge is on the boundary"""
@@ -426,7 +426,7 @@ def is_bdry(self: Face) -> bool:
     """True if face touches bdry. Check all vertices. Does any have an incident edge with None face?"""
     return any([any([he.face is None for he in v.incident]) for v in self.vertices])
 
-# %% ../00_triangle_data_structure.ipynb 77
+# %% ../00_triangle_data_structure.ipynb 78
 @patch
 def get_boundary_faces(self: HalfEdgeMesh) -> List[Face]:
     """Get indices of boundary faces"""
@@ -456,20 +456,20 @@ def get_bdry_hes(self: HalfEdgeMesh) -> List[HalfEdge]:
         returned = (he==start)
     return bdry
 
-# %% ../00_triangle_data_structure.ipynb 79
+# %% ../00_triangle_data_structure.ipynb 80
 @patch
 def set_centroid(self: HalfEdgeMesh) -> None:
     """Set primal positions to triangle centroid"""
     for fc in self.faces.values():
         fc.primal_coords = np.mean(fc.coords, axis=0)
 
-# %% ../00_triangle_data_structure.ipynb 80
+# %% ../00_triangle_data_structure.ipynb 81
 @patch
 def get_centroid(self: Vertex) -> NDArray[Shape["2"],Float]:
     """Get centroid of primal cell"""
     return np.nanmean(self.primal_coords, axis=0)
 
-# %% ../00_triangle_data_structure.ipynb 81
+# %% ../00_triangle_data_structure.ipynb 82
 def get_circumcenter(a: NDArray[Shape["2"],Float], b: NDArray[Shape["2"],Float], c: NDArray[Shape["2"],Float]):
     """Return circumcircle radius, circumcenter coordinates of triangle with lengths a, b, c"""
     b_, c_ = (b-a, c-a)
@@ -492,7 +492,7 @@ def get_voronoi(self: HalfEdgeMesh) -> Dict[int, NDArray[Shape["2"],Float]]:
         circumcenter_dict[fc._fid] = get_circumcenter(*fc.coords)[1]
     return circumcenter_dict
 
-# %% ../00_triangle_data_structure.ipynb 83
+# %% ../00_triangle_data_structure.ipynb 84
 @patch
 def transform_vertices(self: HalfEdgeMesh, trafo: Union[Callable, NDArray[Shape["2, 2"], Float]]) -> None:
     for v in self.vertices.values():
@@ -510,7 +510,7 @@ def transform_primal_vertices(self: HalfEdgeMesh,
         else:
             fc.primal_coords = trafo.dot(fc.primal_coords)
 
-# %% ../00_triangle_data_structure.ipynb 85
+# %% ../00_triangle_data_structure.ipynb 86
 @patch
 def is_consistent(self: HalfEdgeMesh) -> bool:
     """For debugging/testing purposes"""
@@ -535,7 +535,7 @@ def is_consistent(self: HalfEdgeMesh) -> bool:
     
     return True
 
-# %% ../00_triangle_data_structure.ipynb 87
+# %% ../00_triangle_data_structure.ipynb 88
 def is_convex_polygon(polygon) -> bool:
     """Return True if the polynomial defined by the sequence of 2D
     points is 'strictly convex': points are valid, side lengths non-
@@ -590,7 +590,7 @@ def is_convex_polygon(polygon) -> bool:
     except (ArithmeticError, TypeError, ValueError):
         return False  # any exception means not a proper convex polygon
 
-# %% ../00_triangle_data_structure.ipynb 88
+# %% ../00_triangle_data_structure.ipynb 89
 @patch
 def find_primal_problematic(self: HalfEdgeMesh):
     """Find cells and edges where the primal cells are not convex polygons."""
@@ -603,7 +603,7 @@ def find_primal_problematic(self: HalfEdgeMesh):
                 bad_cells.append(v._vid)
     return bad_cells, bad_edges
 
-# %% ../00_triangle_data_structure.ipynb 91
+# %% ../00_triangle_data_structure.ipynb 92
 @patch
 def triplot(self: HalfEdgeMesh):
     """Plot triangulation HalfEdgeMesh. Wraps plt.triplot"""
@@ -683,7 +683,7 @@ def cellplot(self: HalfEdgeMesh, alpha=1, set_lims=False, edge_colors=None, cell
         plt.gca().set_xlim([pts[:,0].min(), pts[:,0].max()])
         plt.gca().set_ylim([pts[:,1].min(), pts[:,1].max()])
 
-# %% ../00_triangle_data_structure.ipynb 94
+# %% ../00_triangle_data_structure.ipynb 95
 @patch
 def get_edge_lens(self: HalfEdgeMesh) -> Dict[int, float]:
     """Get edge lengths (tensions)"""
@@ -706,7 +706,7 @@ def get_rel_tension(self: HalfEdgeMesh) -> Dict[int, float]:
             rel_tensions[he._heid], rel_tensions[twin._heid] = 2*(4*edge_lens[he._heid]/sum(surrounding),)
     return rel_tensions
 
-# %% ../00_triangle_data_structure.ipynb 95
+# %% ../00_triangle_data_structure.ipynb 96
 @patch
 def get_stress_tensor(self: Face) -> Dict[int, NDArray[Shape["2,2"],Float]]:
     """Get stress tensor per face."""
@@ -715,7 +715,7 @@ def get_stress_tensor(self: Face) -> Dict[int, NDArray[Shape["2,2"],Float]]:
     edges = np.stack([-edges[:,1], edges[:,0]])
     return 2/3*np.einsum('ie,je->ij', edges, edges)
 
-# %% ../00_triangle_data_structure.ipynb 96
+# %% ../00_triangle_data_structure.ipynb 97
 def polygon_area(pts: NDArray[Shape["*,2,..."],Float]) -> NDArray[Shape["2,..."],Float]:
     """Area of polygon assuming no self-intersection. pts.shape (n_vertices, 2, ...)"""
     return np.sum(pts[:,0]*np.roll(pts[:,1], 1, axis=0) - np.roll(pts[:,0], 1, axis=0)*pts[:,1], axis=0)/2
@@ -740,7 +740,7 @@ def get_tri_areas(self: HalfEdgeMesh) -> Dict[int,float]:
     """Get areas of triangles in mesh"""
     return {key: val.get_area() for key, val in self.faces.items()}
 
-# %% ../00_triangle_data_structure.ipynb 97
+# %% ../00_triangle_data_structure.ipynb 98
 @patch
 def get_angle_deviation(self: HalfEdgeMesh) -> Dict[int,float]:
     """Sin(angle) between primal and dual edges. For diagnostics"""
@@ -755,7 +755,7 @@ def get_angle_deviation(self: HalfEdgeMesh) -> Dict[int,float]:
             angle_deviation[he._heid] = np.abs(np.dot(dual_edge, primal_edge))
     return angle_deviation
 
-# %% ../00_triangle_data_structure.ipynb 98
+# %% ../00_triangle_data_structure.ipynb 99
 @patch
 def get_primal_edge_lens(self: HalfEdgeMesh, oriented=True) -> Dict[int,float]:
     """Get the length of primal edges. If oriented=True, 'flipped' edges (bowties) have negative lengths."""
@@ -770,7 +770,7 @@ def get_primal_edge_lens(self: HalfEdgeMesh, oriented=True) -> Dict[int,float]:
             len_dict[he._heid] = length
     return len_dict
 
-# %% ../00_triangle_data_structure.ipynb 104
+# %% ../00_triangle_data_structure.ipynb 105
 @patch
 def flip_edge(self: HalfEdgeMesh, e: int) -> None:
     """Flip edge of a triangle mesh. Call by using he index
@@ -826,7 +826,7 @@ def flip_edge(self: HalfEdgeMesh, e: int) -> None:
     
         
 
-# %% ../00_triangle_data_structure.ipynb 120
+# %% ../00_triangle_data_structure.ipynb 121
 @patch
 def save_mesh(self: HalfEdgeMesh, fname: str, d=5) -> None:
     """Save HalfEdgeMesh in as csv file with 3 parts:
@@ -889,7 +889,7 @@ def save_mesh(self: HalfEdgeMesh, fname: str, d=5) -> None:
             
             
 
-# %% ../00_triangle_data_structure.ipynb 123
+# %% ../00_triangle_data_structure.ipynb 124
 def load_mesh(fname: str) -> HalfEdgeMesh:
     """Load from file as saved by mesh.save_mesh"""
     with open(fname) as f:
