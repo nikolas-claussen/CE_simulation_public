@@ -608,8 +608,12 @@ def find_primal_problematic(self: HalfEdgeMesh):
 def triplot(self: HalfEdgeMesh):
     """Plot triangulation HalfEdgeMesh. Wraps plt.triplot"""
     list_format = self.to_ListOfVerticesAndFaces()
-    fcs = np.array(list(list_format.faces.values()))
-    pts = np.array(list(list_format.vertices.values())).T
+    # need to re-index from 0-n_vertices
+    sorted_vertices = sorted(list_format.vertices.keys())
+    vertex_to_ix = {key: ix for ix, key in enumerate(sorted_vertices)}
+    fcs = [[vertex_to_ix[x] for x in tri] for tri in list_format.faces.values()]
+    pts = np.array([list_format.vertices[key] for key in sorted_vertices]).T
+
     plt.triplot(pts[0], pts[1], fcs)
     
 @patch
