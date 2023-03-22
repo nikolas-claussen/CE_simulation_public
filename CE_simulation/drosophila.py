@@ -49,6 +49,7 @@ from matplotlib import animation, rc
 
 # %% ../04_drosophila_simulation.ipynb 11
 import time as time_module # so you don't accidentally overwrite the name 'time' with a variable
+import shutil
 
 def save_self(save_dir, fname='04a_drosophila_simulation_experimentation.ipynb'):
     """Save a copy of current python file to a directory, with a time stamp"""
@@ -226,7 +227,7 @@ def create_rect_initial(nx, ny, noise=0, initial_strain=0, isogonal=0, orientati
     
     return mesh_initial, property_dict
 
-# %% ../04_drosophila_simulation.ipynb 37
+# %% ../04_drosophila_simulation.ipynb 36
 def plot_mesh(i, xlim, ylim, mesh_series, flipped_series=None,
               edge_colors=None, cell_colors=None, slipwall_y=None, plot_cell=True, plot_tri=False):
     """
@@ -272,7 +273,7 @@ def plot_mesh(i, xlim, ylim, mesh_series, flipped_series=None,
         for x in flipped_series[i+1]:
             he = meshes[i].hes[x]
             if plot_cell:
-                line = np.stack([he.face.dual_coords, he.twin.face.dual_coords])
+                line = np.stack([he.face.primal_coords, he.twin.face.primal_coords])
                 plt.plot(*line.T, c="r", lw=4)
             if plot_tri:
                 line = np.stack([he.vertices[0].coords, he.vertices[1].coords])

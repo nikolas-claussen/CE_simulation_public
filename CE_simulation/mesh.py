@@ -689,7 +689,7 @@ def cellplot(self: HalfEdgeMesh, alpha=1, set_lims=False, edge_colors=None, cell
 
 # %% ../00_triangle_data_structure.ipynb 93
 @patch
-def triplot_color(self: msh.HalfEdgeMesh, set_lims=False, edge_colors=None, face_colors=None, lw=1):
+def triplot_color(self: HalfEdgeMesh, set_lims=False, edge_colors=None, face_colors=None, lw=1):
     """Plot triangulation with custom colors using matplotlib LineCollection.
     edge_colors, face_colors are dicts {_heid, _fid : color}. Need only specify non-default elements.
     """
@@ -707,8 +707,8 @@ def triplot_color(self: msh.HalfEdgeMesh, set_lims=False, edge_colors=None, face
         face_list.append(face)
     
     pts = np.stack([self.vertices[key].coords for key in vertex_keys])
-    lines = msh.flatten([[[pts[a],pts[b]] for a, b  in zip(fc, np.roll(fc, 1))]
-                         for fc in face_list], max_depth=1)
+    lines = flatten([[[pts[a],pts[b]] for a, b  in zip(fc, np.roll(fc, 1))]
+                       for fc in face_list], max_depth=1)
     triangles = [[pts[v] for v in fc] for fc in face_list]
     
     reformated_edge = defaultdict(lambda: "k")
@@ -717,8 +717,8 @@ def triplot_color(self: msh.HalfEdgeMesh, set_lims=False, edge_colors=None, face
             he = self.hes[key]
             newkey = (vertex_key_dict[he.vertices[0]._vid], vertex_key_dict[he.vertices[1]._vid])
             reformated_edge[newkey] = reformated_edge[newkey[::-1]] = val
-    colors = list(msh.flatten([[reformated_edge[(a, b)] for a, b  in zip(fc, np.roll(fc, 1))]
-                                for fc in face_list], max_depth=1))
+    colors = list(flatten([[reformated_edge[(a, b)] for a, b  in zip(fc, np.roll(fc, 1))]
+                            for fc in face_list], max_depth=1))
     
     #fig, ax = plt.subplots()
     if face_colors is not None:
