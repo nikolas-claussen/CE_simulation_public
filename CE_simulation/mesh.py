@@ -687,7 +687,51 @@ def cellplot(self: HalfEdgeMesh, alpha=1, set_lims=False, edge_colors=None, cell
         plt.gca().set_xlim([pts[:,0].min(), pts[:,0].max()])
         plt.gca().set_ylim([pts[:,1].min(), pts[:,1].max()])
 
-# %% ../00_triangle_data_structure.ipynb 95
+# %% ../00_triangle_data_structure.ipynb 93
+@patch
+def triplot_color(self: msh.HalfEdgeMesh, set_lims=False, edge_colors=None, face_colors=None, lw=1):
+    """Plot triangulation with custom colors using matplotlib LineCollection.
+    edge_colors, face_colors are dicts {_heid, _fid : color}. Need only specify non-default elements.
+    """
+    vertex_keys = sorted(self.vertices.keys())
+    vertex_key_dict = {key: ix for ix, key in enumerate(vertex_keys)}
+    face_list = []
+    
+    reformated_cell = (defaultdict(lambda: (0,0,0,0)) if face_colors is None
+                       else defaultdict(lambda: (0,0,0,0), face_colors))
+    facecolors = []
+    for fc in self.faces.values():
+        facecolors.append(reformated_cell[fc._fid])
+        face = [vertex_keys[v._vid] for v in fc.vertices]
+        face.append(face[0])
+        face_list.append(face)
+    
+    pts = np.stack([self.vertices[key].coords for key in vertex_keys])
+    lines = msh.flatten([[[pts[a],pts[b]] for a, b  in zip(fc, np.roll(fc, 1))]
+                         for fc in face_list], max_depth=1)
+    triangles = [[pts[v] for v in fc] for fc in face_list]
+    
+    reformated_edge = defaultdict(lambda: "k")
+    if edge_colors is not None: # translate from _heid : color to 
+        for key, val in edge_colors.items():
+            he = self.hes[key]
+            newkey = (vertex_key_dict[he.vertices[0]._vid], vertex_key_dict[he.vertices[1]._vid])
+            reformated_edge[newkey] = reformated_edge[newkey[::-1]] = val
+    colors = list(msh.flatten([[reformated_edge[(a, b)] for a, b  in zip(fc, np.roll(fc, 1))]
+                                for fc in face_list], max_depth=1))
+    
+    #fig, ax = plt.subplots()
+    if face_colors is not None:
+        plt.gca().add_collection(LineCollection(triangles, facecolors=facecolors,
+                                                colors=(0,0,0,0)))
+    plt.gca().add_collection(LineCollection(lines, colors=colors, lw=lw))
+
+    if set_lims:
+        plt.gca().set_xlim([pts[:,0].min(), pts[:,0].max()])
+        plt.gca().set_ylim([pts[:,1].min(), pts[:,1].max()])
+
+
+# %% ../00_triangle_data_structure.ipynb 97
 @patch
 def get_edge_lens(self: HalfEdgeMesh) -> Dict[int, float]:
     """Get edge lengths (tensions)"""
@@ -710,7 +754,7 @@ def get_rel_tension(self: HalfEdgeMesh) -> Dict[int, float]:
             rel_tensions[he._heid], rel_tensions[twin._heid] = 2*(4*edge_lens[he._heid]/sum(surrounding),)
     return rel_tensions
 
-# %% ../00_triangle_data_structure.ipynb 96
+# %% ../00_triangle_data_structure.ipynb 98
 @patch
 def get_stress_tensor(self: Face) -> Dict[int, NDArray[Shape["2,2"],Float]]:
     """Get stress tensor per face."""
@@ -719,7 +763,7 @@ def get_stress_tensor(self: Face) -> Dict[int, NDArray[Shape["2,2"],Float]]:
     edges = np.stack([-edges[:,1], edges[:,0]])
     return 2/3*np.einsum('ie,je->ij', edges, edges)
 
-# %% ../00_triangle_data_structure.ipynb 97
+# %% ../00_triangle_data_structure.ipynb 99
 def polygon_area(pts: NDArray[Shape["*,2,..."],Float]) -> NDArray[Shape["2,..."],Float]:
     """Area of polygon assuming no self-intersection. pts.shape (n_vertices, 2, ...)"""
     return np.sum(pts[:,0]*np.roll(pts[:,1], 1, axis=0) - np.roll(pts[:,0], 1, axis=0)*pts[:,1], axis=0)/2
@@ -744,7 +788,7 @@ def get_tri_areas(self: HalfEdgeMesh) -> Dict[int,float]:
     """Get areas of triangles in mesh"""
     return {key: val.get_area() for key, val in self.faces.items()}
 
-# %% ../00_triangle_data_structure.ipynb 98
+# %% ../00_triangle_data_structure.ipynb 100
 @patch
 def get_angle_deviation(self: HalfEdgeMesh) -> Dict[int,float]:
     """Sin(angle) between primal and dual edges. For diagnostics"""
@@ -759,7 +803,7 @@ def get_angle_deviation(self: HalfEdgeMesh) -> Dict[int,float]:
             angle_deviation[he._heid] = np.abs(np.dot(dual_edge, primal_edge))
     return angle_deviation
 
-# %% ../00_triangle_data_structure.ipynb 99
+# %% ../00_triangle_data_structure.ipynb 101
 @patch
 def get_primal_edge_lens(self: HalfEdgeMesh, oriented=True) -> Dict[int,float]:
     """Get the length of primal edges. If oriented=True, 'flipped' edges (bowties) have negative lengths."""
@@ -774,7 +818,7 @@ def get_primal_edge_lens(self: HalfEdgeMesh, oriented=True) -> Dict[int,float]:
             len_dict[he._heid] = length
     return len_dict
 
-# %% ../00_triangle_data_structure.ipynb 105
+# %% ../00_triangle_data_structure.ipynb 107
 @patch
 def flip_edge(self: HalfEdgeMesh, e: int) -> None:
     """Flip edge of a triangle mesh. Call by using he index
@@ -830,7 +874,7 @@ def flip_edge(self: HalfEdgeMesh, e: int) -> None:
     
         
 
-# %% ../00_triangle_data_structure.ipynb 121
+# %% ../00_triangle_data_structure.ipynb 123
 @patch
 def save_mesh(self: HalfEdgeMesh, fname: str, d=5) -> None:
     """Save HalfEdgeMesh in as csv file with 3 parts:
@@ -893,7 +937,7 @@ def save_mesh(self: HalfEdgeMesh, fname: str, d=5) -> None:
             
             
 
-# %% ../00_triangle_data_structure.ipynb 124
+# %% ../00_triangle_data_structure.ipynb 126
 def load_mesh(fname: str) -> HalfEdgeMesh:
     """Load from file as saved by mesh.save_mesh"""
     with open(fname) as f:
