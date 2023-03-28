@@ -466,7 +466,7 @@ def excitable_dt_act_pass(Ts: NDArray[Shape["3"], Float], Tps: NDArray[Shape["3"
     dT_dt -= area_jac * (area_jac@dT_dt)    
     return dT_dt, dTp_dt
 
-# %% ../01_tension_time_evolution.ipynb 74
+# %% ../01_tension_time_evolution.ipynb 75
 @patch
 def reset_rest_passive_flip(self: TensionHalfEdgeMesh, e: TensionHalfEdge, method="smooth") -> None:
     """
@@ -489,7 +489,7 @@ def reset_rest_passive_flip(self: TensionHalfEdgeMesh, e: TensionHalfEdge, metho
     else:
         print("method must be smooth or direct")
 
-# %% ../01_tension_time_evolution.ipynb 75
+# %% ../01_tension_time_evolution.ipynb 76
 @patch
 def euler_step(self: TensionHalfEdgeMesh, dt=.005, rhs_tension=excitable_dt_act_pass, params=None,
                rhs_rest_shape: Union[None, callable]=None) -> None:

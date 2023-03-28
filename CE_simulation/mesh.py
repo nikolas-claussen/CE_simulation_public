@@ -112,7 +112,7 @@ class ListOfVerticesAndFaces:
         self.neighbors = get_neighbors(self.faces)
     
     def remove_face(self, f_id):
-        face = self.vertices[f_id]
+        face = self.faces[f_id]
         del self.faces[f_id]
         for v in face:
             if not any([v in fc for fc in self.faces.values()]):
@@ -425,6 +425,11 @@ def is_bdry(self: Vertex) -> bool:
 def is_bdry(self: Face) -> bool:
     """True if face touches bdry. Check all vertices. Does any have an incident edge with None face?"""
     return any([any([he.face is None for he in v.incident]) for v in self.vertices])
+
+@patch
+def is_bdry_edge(self: Face) -> bool:
+    """True if face touches bdry with an edge. """
+    return any([he.is_bdry() for he in self.hes])
 
 # %% ../00_triangle_data_structure.ipynb 78
 @patch
