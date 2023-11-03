@@ -115,13 +115,12 @@ def get_triangular_lattice(nx: int, ny: int) -> Tuple[NDArray[Shape["2,*"],Float
     
     return pts, is_bdry
 
-def create_rect_mesh(nx: int, ny: int, noise: float=0, defects=(0,0),
+def create_rect_mesh(nx: int, ny: int, noise: float=0,
                      straight_bdry=False) -> msh.HalfEdgeMesh:
     """
     Create a half-edge mesh rectangular patch of triangular lattice. 
     
-    Edges have length 1 by default. Optionally, add noise to vertex positions and create point defects
-    at random positions.
+    Edges have length 1 by default. Optionally, add noise to vertex positions.
     
     Parameters
     ----------
@@ -130,8 +129,6 @@ def create_rect_mesh(nx: int, ny: int, noise: float=0, defects=(0,0),
         x- and y- dimensions of lattice patch
     noise: float
         Standard deviation of Gaussian noise to be added to vertex positions
-    defects: tuple (int, int)
-        Number of missing/duplicate defects
     straight_bdry: bool
         Keep triangles at boundary, which are not equilateral.
         
@@ -141,15 +138,6 @@ def create_rect_mesh(nx: int, ny: int, noise: float=0, defects=(0,0),
     """
     pts, is_bdry = get_triangular_lattice(nx, ny)
     pts[:,~is_bdry.astype(bool)] += np.random.normal(scale=noise, size=(2, (~is_bdry.astype(bool)).sum()))
-    if defects[0] > 0:
-        ix = np.random.choice(np.where(1-is_bdry)[0], size=defects[0], replace=False)
-        pts = np.delete(pts, ix, axis=1)
-    if defects[1] > 0:
-        ix = np.random.choice(np.where(1-is_bdry)[0], size=defects[1], replace=False)
-        split = np.random.choice((0,1), len(ix))
-        additional_pts =  pts[:, ix] + .3*np.stack([1-split, split]) 
-        pts[:, ix] -= .3*np.stack([1-split, split]) 
-        pts = np.hstack([pts, additional_pts])
     
     tri = spatial.Delaunay(pts.T)
     # remove the left, right edge
@@ -233,7 +221,7 @@ def get_vertex_angles(self: msh.HalfEdgeMesh, method: Literal["real", "dual"]="r
                    for fc in self.faces.values() if (not (fc._fid in exclude))}
         angles = {key: tns.sides_angles(val) for key, val in lengths.items()}
     if method == "real":
-        angles = []
+        angles = {}
         for fc in self.faces.values():
             if (not (fc._fid in exclude)) and (not fc.is_bdry()):
                 vecs = np.stack([he.twin.face.primal_coords-fc.primal_coords for he in fc.hes])
@@ -296,10 +284,15 @@ def get_conformal_transform(mesh1: msh.HalfEdgeMesh, mesh2: msh.HalfEdgeMesh) ->
     """
     Get rotation+scaling+translation to match mesh2's triangulation to mesh1. Preserves overall area.
     """
-    bdry1 = np.stack([he.vertices[0].coords for he in mesh1.get_bdry_hes()])
-    bdry2 = np.stack([he.vertices[0].coords for he in mesh2.get_bdry_hes()])
-    rescale = np.sqrt(msh.polygon_area(bdry1)/msh.polygon_area(bdry2))
+    # using the mesh bdry is stupid and bug-prone. use rather sum over triangles
+    #bdry1 = np.stack([he.vertices[0].coords for he in mesh1.get_bdry_hes()])
+    #bdry2 = np.stack([he.vertices[0].coords for he in mesh2.get_bdry_hes()])
+    #rescale = np.sqrt(msh.polygon_area(bdry1)/msh.polygon_area(bdry2))
 
+    area1 = abs(sum(mesh1.get_tri_areas().values()))
+    area2 = abs(sum(mesh2.get_tri_areas().values()))
+    rescale = np.sqrt(area1/area2)
+    
     pts1 = np.stack([v.coords for v in mesh1.vertices.values()])
     pts2 = np.stack([v.coords for v in mesh2.vertices.values()])
     mean1, mean2 = (pts1.mean(axis=0), pts2.mean(axis=0))

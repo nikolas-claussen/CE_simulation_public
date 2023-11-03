@@ -154,14 +154,14 @@ def _4fold_filter(values, graph_dict):
         graph_dict[values[3]].add(values[0])
     return 0.
 
-# %% ../07_from_segmentation.ipynb 39
+# %% ../07_from_segmentation.ipynb 42
 def get_com_dict(labeled: NDArray[Shape["*,*"], Int]) -> Dict[int, NDArray[Shape["2"], Float]]: 
     """Get the centroids of regions in a labeled array"""
     return {key: np.array(ndimage.center_of_mass(labeled==key)) for key in np.unique(labeled)}
         
 
-# %% ../07_from_segmentation.ipynb 54
-def image_to_hmesh(img, min_area=4, vertex_dil=1, cell_size=None):
+# %% ../07_from_segmentation.ipynb 57
+def image_to_hmesh(img, min_area=4, vertex_dil=1, cell_size=None, remove_cells=None):
     """
     Compute half-edge mesh from image data.
     
@@ -199,8 +199,17 @@ def image_to_hmesh(img, min_area=4, vertex_dil=1, cell_size=None):
     tris = get_triangles(labeled_to_graph(lbl))
     points = get_com_dict(lbl)
     points = {key: val[::-1] for key, val in points.items()}
+    #if remove_cells is not None:
+        #points = {key: val for key, val in points.items() if not key in remove_cells}
+        #tris = [val for val in tris if not any([x in remove_cells for x in val])]
+    #del points[1]       
+    #tris = [val for val in tris if not 1 in val]
     
-    hemesh = msh.HalfEdgeMesh(msh.ListOfVerticesAndFaces(points, tris))
+    # detect and remove duplicate triangles ("tetrahedron" configurations)
+    tris = [fc for fc in tris if not any([is_in_tri(p, points[fc[0]], points[fc[1]], points[fc[2]])
+                                          for key, p in points.items() if not key in fc])]
+    
+    hemesh = msh.HalfEdgeMesh(msh.ListOfVerticesAndFaces(points, tris), strict=True)
 
     if cell_size is None:
         cell_size = int(np.ceil(np.quantile(list(hemesh.get_edge_lens().values()), .95)))
@@ -209,8 +218,8 @@ def image_to_hmesh(img, min_area=4, vertex_dil=1, cell_size=None):
     for fc in hemesh.faces.values():
         center = np.round(fc.coords.mean(axis=0)).astype(int)
         # use take to wrap around edges
-        windowed = labeled_test.take(range(center[1]-cell_size, center[1]+cell_size), mode='wrap', axis=0).take(
-                                     range(center[0]-cell_size,center[0]+cell_size),  mode='wrap', axis=1)
+        windowed = lbl.take(range(center[1]-cell_size, center[1]+cell_size), mode='wrap', axis=0).take(
+                            range(center[0]-cell_size,center[0]+cell_size),  mode='wrap', axis=1)
         com = ndimage.center_of_mass(np.prod([ndimage.binary_dilation(windowed==v._vid, iterations=1)
                                               for v in fc.vertices], axis=0))
         fc.primal_coords = center + com[::-1] - np.array([cell_size, cell_size])    

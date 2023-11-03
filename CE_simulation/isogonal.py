@@ -2,7 +2,8 @@
 
 # %% auto 0
 __all__ = ['get_E_jac', 'get_shape_tensor', 'CellVertex', 'CellHalfEdgeMesh', 'get_shape_energy', 'get_vertex_energy',
-           'jit_signature', 'get_default_args', 'get_args', 'kwargs_to_args', 'get_E', 'rotate_about_center']
+           'jit_signature', 'get_default_args', 'get_args', 'kwargs_to_args', 'get_circumcenter', 'get_E',
+           'rotate_about_center']
 
 # %% ../03_real_shape_optimization.ipynb 3
 import CE_simulation.mesh as msh
@@ -177,7 +178,7 @@ def set_rest_shapes(self: CellHalfEdgeMesh) -> None:
 
 # %% ../03_real_shape_optimization.ipynb 24
 def get_shape_energy(poly: NDArray[Shape["*,2"],Float],
-                     rest_shape: NDArray[Shape["2,2"],Float]=jnp.eye(2), A0=jnp.sqrt(3)/2,
+                     rest_shape: NDArray[Shape["2,2"],Float]=np.eye(2), A0=np.sqrt(3)/2,
                      mod_shear=.5, mod_bulk=1, mod_area=0) -> float:
     """
     Compute shape tensor energy for polygon.
@@ -207,7 +208,7 @@ def get_shape_energy(poly: NDArray[Shape["*,2"],Float],
     return mod_shear*(delta**2).sum()+mod_bulk*np.trace(delta)**2+mod_area*(area-A0)**2
 
 
-def get_vertex_energy(poly: NDArray[Shape["*,2"],Float], A0=jnp.sqrt(3)/2, P0=1, mod_area=1, mod_perimeter=0):
+def get_vertex_energy(poly: NDArray[Shape["*,2"],Float], A0=np.sqrt(3)/2, P0=1, mod_area=1, mod_perimeter=0):
     """
     Get vertex-model style energy for (ordered) polygon.
     
@@ -242,7 +243,7 @@ def get_default_args(func):
             if v.default is not inspect.Parameter.empty}
 
 def get_args(func):
-    """Return positional and kwards of a function, in definition order."""
+    """Return positional and kwargs of a function, in definition order."""
     signature = jit_signature(func)
     pos_args = [k for k, v in signature.parameters.items() if v.default is inspect.Parameter.empty]
     kw_args = [k for k, v in signature.parameters.items() if not v.default is inspect.Parameter.empty]
@@ -284,16 +285,24 @@ def kwargs_to_args(func: Callable, kwargs: Dict, skip_first=1) -> List:
 
 # %% ../03_real_shape_optimization.ipynb 29
 @patch
-def primal_vertices_to_vector(self: CellHalfEdgeMesh, flattened=True) -> NDArray[Shape["*"],Float]:
+def primal_vertices_to_vector(self: CellHalfEdgeMesh, coordinate_dict=None,
+                              flattened=True) -> NDArray[Shape["*"],Float]:
     """
-    Format dual vertices for use in energy minimization.
+    Format primal vertices for use in energy minimization.
     
-    Returns vector of dual vertex positions (=cell vertices, associated with triangles).
+    Returns vector of primal vertex positions (=cell vertices, associated with triangles).
     Faces are inserted into the vector ordered according to their keys.
     If flattened, flatten into 1d array in C-order. Else, return (n_faces, 2 array)
+    
+    If coordinate_dict is not None, this function will serialize the vertex positions saved in the 
+    coordinate_dict, otherwise the vertex positions saved internally
+    
     """
     face_keys = sorted(self.faces.keys())
-    primal_vertex_vector = np.stack([self.faces[key].primal_coords for key in face_keys])
+    if coordinate_dict is None:
+        primal_vertex_vector = np.stack([self.faces[key].primal_coords for key in face_keys])
+    else:
+        primal_vertex_vector = np.stack([coordinate_dict[key] for key in face_keys])
     if flattened:
         return primal_vertex_vector.reshape(2*primal_vertex_vector.shape[0])
     return primal_vertex_vector
@@ -315,6 +324,18 @@ def vector_to_primal_vertices(self: CellHalfEdgeMesh, x0: NDArray[Shape["*"],Flo
 
 
 # %% ../03_real_shape_optimization.ipynb 36
+@jit
+def get_circumcenter(a: NDArray[Shape["2"],Float], b: NDArray[Shape["2"],Float], c: NDArray[Shape["2"], Float]
+                    ) -> NDArray[Shape["2"],Float]:
+    """Return circumcenter coordinates of triangle with lengths a, b, c (JIT version)"""
+    b_, c_ = (b-a, c-a)
+    d_ = 2*(b_[0]*c_[1]-b_[1]*c_[0])
+    u_ = jnp.array([c_[1]*jnp.sum(b_**2)-b_[1]*jnp.sum(c_**2), b_[0]*jnp.sum(c_**2)-c_[0]*jnp.sum(b_**2)]) / d_
+    r = jnp.linalg.norm(u_)
+    return u_ + a
+
+
+# %% ../03_real_shape_optimization.ipynb 37
 @patch
 def serialize_primal(self: CellHalfEdgeMesh, cell_attribs=('rest_shape',)):
     """
@@ -377,6 +398,7 @@ def serialize_primal(self: CellHalfEdgeMesh, cell_attribs=('rest_shape',)):
 
     # serializing the cells, eg.g. for shape tensor energy
     cell_list = []
+    circum_cen_list = []
     cell_attrib_dict = {key: [] for key in cell_attribs}
     # for future "convenience" also return a vector of _vids corresponding to the cell list
     cell_list_vids = []
@@ -422,11 +444,11 @@ def serialize_primal(self: CellHalfEdgeMesh, cell_attribs=('rest_shape',)):
     
     return return_dict, cell_list_vids
 
-# %% ../03_real_shape_optimization.ipynb 40
+# %% ../03_real_shape_optimization.ipynb 41
 @jit
 def get_E(x0, e_lst_primal, e_dual, cell_list, bdry_list, valence_mask,
-          mod_bulk=0, mod_shear=0, rest_shape=jnp.sqrt(3)*jnp.eye(2),
-          mod_area=0, A0=jnp.sqrt(3)/2, mod_perimeter=0, P0=2*jnp.sqrt(3),
+          mod_bulk=0, mod_shear=0, rest_shape=np.sqrt(3)*np.eye(2),
+          mod_area=0, A0=np.sqrt(3)/2, mod_perimeter=0, P0=2*np.sqrt(3),
           angle_penalty=1000, bdry_penalty=1000, epsilon_l=(1e-3, 1e-3)):
     """
     Compute cell elastic energy with angle & boundary constraint penalties.
@@ -457,7 +479,9 @@ def get_E(x0, e_lst_primal, e_dual, cell_list, bdry_list, valence_mask,
     mod_area, A0, mod_perimeter, P0: float
         Moduli and reference area/perimeter for vertex-model elasticity
     angle_penalty, bdry_penalty: float
-        Penalties enforcing area and boundary constraints
+        Penalties enforcing area and boundary constraints.
+        angle_penalty can be patterned (i.e. distinct for different edges), in
+        which case it needs to be a (len(e_lst_primal),) shape vector.
     epsilon_l: tuple (float, float)
         Regularization for short-length edges, required for differentiability.
         The 0st entry is the regularization for the shape energy,
@@ -491,7 +515,7 @@ def get_E(x0, e_lst_primal, e_dual, cell_list, bdry_list, valence_mask,
     lengths = jnp.sqrt(jnp.sum(e_primal**2, axis=-1)+epsilon_l[1]**2)
     lengths_dual = jnp.linalg.norm(e_dual, axis=-1)
     # + epsilon to avoid 0-division error and make penalty smooth as length passes through 0
-    E_angle = angle_penalty*jnp.mean(1-jnp.einsum('ie,ie->e', e_primal.T/lengths, e_dual.T/lengths_dual))
+    E_angle = jnp.mean(angle_penalty*(1-jnp.einsum('ie,ie->e', e_primal.T/lengths, e_dual.T/lengths_dual)))
     # note: non-zero epsilon creates a "penalty" against 0-length edges because 
     
     # boundary conditions
@@ -507,13 +531,16 @@ def get_E(x0, e_lst_primal, e_dual, cell_list, bdry_list, valence_mask,
 
 get_E_jac = jit(jgrad(get_E))
 
-# %% ../03_real_shape_optimization.ipynb 60
+# %% ../03_real_shape_optimization.ipynb 61
 @patch
 def optimize_cell_shape(self: CellHalfEdgeMesh,
                         energy_args=None, cell_id_to_modulus=None, cell_attribs=('rest_shape',),
+                        edge_id_to_angle_penalty=None,
                         tol=1e-3, maxiter=10000, verbose=True, bdr_weight=2, return_sol=False) -> None:
     """
     Set primal vertex positions by constrained cell-shape energy optimization.
+    
+    To do: update to be able to change also the ratio of shear and bulk mod in the different regions!
     
     The parameters for the elastic energy (e.g. moduli) are passed as a dict 'energy_args'.
     self.bdry_list contains the boundary conditions, as pairs (penalty function, vertex ids).
@@ -541,8 +568,13 @@ def optimize_cell_shape(self: CellHalfEdgeMesh,
             - angle_penalty = 1000 : angle constraint penalty
             - bdry_penalty = 1000 : boundary condition constraint penalty
             - epsilon_l = (1e-3, 1e-3) : regularization for small edge lengths
-    cell_id_to_modulus: callable
+    cell_id_to_modulus: callable or dict of callables
         Map vertex id -> relative elastic modulus. If None, all cells have the same moduli.
+        If this is a dictionary, assumes that there is such a map for each modulus,
+        i.e. 'mod_bulk', 'mod_shear', 'mod_area', 'mod_perimeter'.
+    edge_id_to_angle_penalty: callable or None
+        If not None, is used to create a different angle penalty for each edge.
+        In this case, it needs to be a callable edge id -> relative angle penalty.
     cell_attribs: tuple of str
         Mesh cell attributes to serialize
     tol: float
@@ -564,13 +596,16 @@ def optimize_cell_shape(self: CellHalfEdgeMesh,
     x0 = self.primal_vertices_to_vector()
     serialized_dict, cell_list_vids = self.serialize_primal(cell_attribs)
 
-    # modiy the moduli depending on the mesh attributes - 
+    # modify the moduli depending on the mesh attributes - 
     modified = {} if energy_args is None else deepcopy(energy_args)
     if cell_id_to_modulus is not None:
         for key in ['mod_bulk', 'mod_shear', 'mod_area', 'mod_perimeter']:
             if key in modified:
-                modified[key] = modified[key]*np.vectorize(cell_id_to_modulus)(cell_list_vids)
-    
+                if isinstance(cell_id_to_modulus, dict):
+                    modified[key] = modified[key]*np.vectorize(cell_id_to_modulus[key])(cell_list_vids)
+                else:
+                    modified[key] = modified[key]*np.vectorize(cell_id_to_modulus)(cell_list_vids)
+
     if bdr_weight != 1:
         is_bdr = np.array([any([fc.is_bdry() for fc in self.vertices[v].faces])
                            for v in cell_list_vids])
@@ -580,9 +615,13 @@ def optimize_cell_shape(self: CellHalfEdgeMesh,
     for key in modified.keys():
         if key in serialized_dict.keys():
             print(f'Overriding mesh values for {key} with manually provided value')
+    # new: modify the angle penalty
+    if edge_id_to_angle_penalty is not None:
+        hes = np.array([key for key, he in sorted(self.hes.items())
+                        if not he.is_bdry() and he.duplicate]) # from get_E
+        modified["angle_penalty"] = modified["angle_penalty"]*np.vectorize(edge_id_to_angle_penalty)(hes)
+        
     args = kwargs_to_args(get_E, serialized_dict | modified)
-
-    
     sol = optimize.minimize(get_E, x0, jac=get_E_jac, args=args,
                             method="CG", tol=tol, options={"maxiter": maxiter})
     if sol["status"] !=0 and verbose:
@@ -593,7 +632,7 @@ def optimize_cell_shape(self: CellHalfEdgeMesh,
     if return_sol:
         return sol
 
-# %% ../03_real_shape_optimization.ipynb 67
+# %% ../03_real_shape_optimization.ipynb 69
 def rotate_about_center(x: NDArray[Shape["*,2"],Float], angle=np.pi/2):
     """
     Rotate points about center of mass. x.shape = (n_pts, 2).
@@ -603,11 +642,11 @@ def rotate_about_center(x: NDArray[Shape["*,2"],Float], angle=np.pi/2):
     center = np.mean(x, axis=0)
     return (x-center)@dln.rot_mat(angle)+center
 
-# %% ../03_real_shape_optimization.ipynb 68
+# %% ../03_real_shape_optimization.ipynb 70
 @patch
 def get_flip_edge(self: CellHalfEdgeMesh, minimal_l: float, exclude: List[int]) -> Union[int, None]:
     """
-    Gey key of the shortest primal edge in mesh if length < minimal_l and key not in exclude, else None.
+    Get key of the shortest primal edge in mesh if length < minimal_l and key not in exclude, else None.
     """
     
     primal_lengths = self.get_primal_edge_lens(oriented=True)
@@ -618,10 +657,10 @@ def get_flip_edge(self: CellHalfEdgeMesh, minimal_l: float, exclude: List[int]) 
         return primal_lengths[0][0]
     return None
 
-# %% ../03_real_shape_optimization.ipynb 69
+# %% ../03_real_shape_optimization.ipynb 71
 @patch
 def intercalate(self: CellHalfEdgeMesh, exclude: List[int], minimal_l: float,
-                reoptimize=True, optimizer_args=None) -> Tuple[List, List]:
+                reoptimize=True, method_tension_post_t1="smooth", optimizer_args=None) -> Tuple[List, List]:
     """
     Intercalate short junctions and return list of (failed) intercalations.
     
@@ -647,6 +686,8 @@ def intercalate(self: CellHalfEdgeMesh, exclude: List[int], minimal_l: float,
             - energy_args
             - cell_id_to_modulus
             - tol, maxiter
+    method_tension_post_t1 : str, either "smooth" or "direct"
+        How to set active tensions post T1
 
     Returns
     -------
@@ -668,7 +709,7 @@ def intercalate(self: CellHalfEdgeMesh, exclude: List[int], minimal_l: float,
             # flip and re-set the vertex coordinates
             he = self.hes[flip_edge]
             self.flip_edge(flip_edge)
-            self.reset_rest_passive_flip(he, method="smooth")
+            self.reset_rest_passive_flip(he, method=method_tension_post_t1)
             f0, f1 = (he.face, he.twin.face)
             f0.primal_coords, f1.primal_coords = rotate_about_center(np.stack([f0.primal_coords,
                                                                                f1.primal_coords]))

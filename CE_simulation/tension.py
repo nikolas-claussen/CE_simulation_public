@@ -3,7 +3,8 @@
 # %% auto 0
 __all__ = ['get_E_dual_jac', 'vectors_angle', 'sides_area', 'sides_circum', 'sides_angles', 'angles_shape', 'sides_area_jac',
            'excitable_dt', 'TensionHalfEdge', 'TensionHalfEdgeMesh', 'polygon_area', 'polygon_perimeter', 'get_E_dual',
-           'excitable_dt_act_pass']
+           'excitable_dt_act_pass', 'excitable_dt_act_pass_perimeter', 'excitable_dt_act_pass_perimeter_passive_rest',
+           'excitable_dt_act_pass_new', 'excitable_dt_act_pass_new_passive_rest', 'excitable_dt_act_pass_new_area']
 
 # %% ../01_tension_time_evolution.ipynb 3
 import CE_simulation.mesh as msh
@@ -38,7 +39,7 @@ import functools
 def vectors_angle(a: NDArray[Shape["*"],Float], b: NDArray[Shape["*"],Float]) -> float:
     """Angle between two vectors"""
     inner = (a@b)/np.sqrt((a@a)*(b@b))
-    return np.arccos(inner)
+    return np.arccos(np.clip(inner, -1, 1))
 
 def sides_area(Ts: NDArray[Shape["3,..."],Float]):
     """Triangle area from side lengths."""
@@ -259,12 +260,15 @@ def polygon_perimeter(pts: NDArray[Shape["*,2,..."], Float], epsilon_l=1e-4) -> 
 
 # %% ../01_tension_time_evolution.ipynb 44
 @patch
-def serialize_triangulation(self: TensionHalfEdgeMesh):
+def serialize_triangulation(self: TensionHalfEdgeMesh, return_bdry_info=False):
     """
     Serialize triangulation structure into numpy arrays.
     
     "Serializes" a HalfEdgeMesh into a bunch of arrays which can be used by a JAX-compatible
     function to compute the "elastic energy" used to flatten a triangulation.
+    
+    If return_bdry_info, can also give information on which edges are part of the boundary, to be
+    used by the optimizer
     
     Returns
     -------
@@ -277,10 +281,16 @@ def serialize_triangulation(self: TensionHalfEdgeMesh):
         Rest lengths of each edge
     tri_lst : (n_triangles, 3) array
         Indices to the serialized vertex positions defining tr iangles in triangulation
+    direct_bdry : (n_edges,) array
+        edges which are direct boundary edges
+    indirect_bdry : (n_edges,) array
+        Edges which are direct boundary edges, or indirect boundary edges (part of a boundary face)
     """
     e_lst = []
     tri_lst = []
     rest_lengths = []
+    direct_bdry = []
+    indirect_bdry = []
 
     # we will need to look up which vertex key corresponds to list position
     vertex_key_dict = {key: ix for ix, key in enumerate(sorted(self.vertices.keys()))}
@@ -289,21 +299,32 @@ def serialize_triangulation(self: TensionHalfEdgeMesh):
         if e.duplicate: # avoid duplicates
             e_lst.append([vertex_key_dict[v._vid] for v in e.vertices])
             rest_lengths.append((e.rest+e.twin.rest)/2)
+            
+            is_direct_bdry = (e.face is None) or (e.twin.face is None)
+            is_indirect_bdry = False
+            if not is_direct_bdry:
+                is_indirect_bdry = e.face.is_bdry() or e.twin.face.is_bdry()
+            direct_bdry.append(is_direct_bdry)
+            indirect_bdry.append(is_indirect_bdry)
     e_lst = jnp.array(e_lst).T
     rest_lengths = jnp.array(rest_lengths)
+    direct_bdry = jnp.array(direct_bdry)
+    indirect_bdry = jnp.array(indirect_bdry)
     
     for fc in self.faces.values():
         tri_lst.append([vertex_key_dict[v._vid] for v in fc.vertices][::-1])
     tri_lst = jnp.array(tri_lst).T
-    n_vertices = len(self.vertices)
     
+    if return_bdry_info:
+        return {'e_lst': e_lst, 'rest_lengths': rest_lengths, 'tri_lst': tri_lst,
+                'direct_bdry': direct_bdry, 'indirect_bdry': indirect_bdry}
     return {'e_lst': e_lst, 'rest_lengths': rest_lengths, 'tri_lst': tri_lst}
 
 # %% ../01_tension_time_evolution.ipynb 45
 @jit
 def get_E_dual(x0: NDArray[Shape["*"],Float], e_lst: NDArray[Shape["*, 2"],Float],
                rest_lengths: NDArray[Shape["*"],Float], tri_lst: NDArray[Shape["*, 3"],Float],
-               mod_area=0.01, A0=jnp.sqrt(3)/4) -> float:
+               mod_area=0.01, A0=np.sqrt(3)/4, k_length=1) -> float:
     """
     Dual energy function for triangulation flattening
     
@@ -326,6 +347,8 @@ def get_E_dual(x0: NDArray[Shape["*"],Float], e_lst: NDArray[Shape["*, 2"],Float
         Strength of area regularization
     A0: float
         Triangle reference area for area regularization 
+    k_length : float or (n_edges) array
+        Spring stiffness
     
     Returns
     -------
@@ -336,7 +359,7 @@ def get_E_dual(x0: NDArray[Shape["*"],Float], e_lst: NDArray[Shape["*, 2"],Float
     pts = x0.reshape((int(x0.shape[0]/2), 2))
     
     lengths = jnp.linalg.norm(pts[e_lst[0]]-pts[e_lst[1]], axis=1)
-    E_length = 1/2 * jnp.sum((lengths-rest_lengths)**2)
+    E_length = 1/2 * jnp.sum(k_length*(lengths-rest_lengths)**2)
     # triangle area penalty
     A = polygon_area(pts[tri_lst].transpose((0,2,1)))
     # orientation penalty:
@@ -347,9 +370,10 @@ def get_E_dual(x0: NDArray[Shape["*"],Float], e_lst: NDArray[Shape["*, 2"],Float
   
 get_E_dual_jac = jit(jgrad(get_E_dual))
 
-# %% ../01_tension_time_evolution.ipynb 52
+# %% ../01_tension_time_evolution.ipynb 57
 @patch
-def flatten_triangulation(self: TensionHalfEdgeMesh, tol=1e-4, verbose=True, mod_area=0.01, A0=jnp.sqrt(3)/4,
+def flatten_triangulation(self: TensionHalfEdgeMesh, tol=1e-4, verbose=True, mod_area=0.01, A0=np.sqrt(3)/4,
+                          soften_direct=0, soften_indirect=0,
                           reset_intrinsic=True, return_sol=False) -> Union[None, Dict]:
     """
     Flatten triangulation - optimize vertex positions to match intrinsic lengths.
@@ -376,13 +400,21 @@ def flatten_triangulation(self: TensionHalfEdgeMesh, tol=1e-4, verbose=True, mod
         Area regularization, passed on to get_E_dual
     A0 : float
         Reference triangle area, passed on to get_E_dual
+    soften_direct, soften_indirect : float
+        Soften the "springs" corresponding to direct and indirect boundary edges. Use a value between 0-1
+        0 = no softening.
     reset_intrinsic : bool
         Reset intrinsic lengths after optimization
     return_sol : bool
         Return optimizer result dict
     """
-    energy_arrays = self.serialize_triangulation()
-    args = tuple([energy_arrays[key] for key in ['e_lst', 'rest_lengths', 'tri_lst']]+[mod_area, A0])
+    energy_arrays = self.serialize_triangulation(return_bdry_info=True)
+    if soften_direct==0 and soften_indirect==0:
+        k_length = 1
+    else:
+        k_length = 1-soften_direct*energy_arrays['direct_bdry']-soften_indirect*energy_arrays['indirect_bdry']
+        
+    args = tuple([energy_arrays[key] for key in ['e_lst', 'rest_lengths', 'tri_lst']]+[mod_area, A0, k_length])
     x0 = self.vertices_to_vector()
     sol = optimize.minimize(get_E_dual, x0, method="CG", jac=get_E_dual_jac, tol=tol, args=args)
     sol['initial_fun'] = float(get_E_dual(x0, *args))
@@ -397,7 +429,7 @@ def flatten_triangulation(self: TensionHalfEdgeMesh, tol=1e-4, verbose=True, mod
     if return_sol:
         return sol
 
-# %% ../01_tension_time_evolution.ipynb 70
+# %% ../01_tension_time_evolution.ipynb 76
 @patch
 def get_angles(self: TensionHalfEdgeMesh) -> Dict[int, float]:
     """Get the angle opposite to each half edge in the mesh."""
@@ -418,7 +450,7 @@ def get_double_angles(self: TensionHalfEdgeMesh) -> Dict[int, float]:
                              if (he.face is not None) and (he.twin.face is not None)}
     return double_angles
 
-# %% ../01_tension_time_evolution.ipynb 73
+# %% ../01_tension_time_evolution.ipynb 80
 def excitable_dt_act_pass(Ts: NDArray[Shape["3"], Float], Tps: NDArray[Shape["3"], Float], k=1, m=2, k_cutoff=0,
                           ) -> Tuple[NDArray[Shape["3"],Float],NDArray[Shape["3"],Float]]:
     """
@@ -466,7 +498,296 @@ def excitable_dt_act_pass(Ts: NDArray[Shape["3"], Float], Tps: NDArray[Shape["3"
     dT_dt -= area_jac * (area_jac@dT_dt)    
     return dT_dt, dTp_dt
 
-# %% ../01_tension_time_evolution.ipynb 75
+# %% ../01_tension_time_evolution.ipynb 81
+def excitable_dt_act_pass_perimeter(Ts: NDArray[Shape["3"], Float], Tps: NDArray[Shape["3"], Float], k=1, m=2,
+                                    k_cutoff=0,) -> Tuple[NDArray[Shape["3"],Float],NDArray[Shape["3"],Float]]:
+    """
+    Time derivative of tensions under excitable tension model, including passive tension.
+    
+    Perimeter version -- keeps triangle perimeter fixed. Perimeter of the passive tension may vary of course.
+    
+    Implements the following equations:
+        d_dt T = T^m
+        d_dt T_passive = -k*T_passive
+    
+    with the following additions:
+        - a -k_cutoff*T^(m+1) term which cuts of excitable feedback at large tensions for numerical stability
+        - projection of the d_dt T - vector on triangle-perimter-preserving edge length changes
+    
+    For m==1 (no excitable tension feedback), we implement a special case:
+        d_dt T = -k*(T-1)
+    i.e. tensions relax back to equilateral. This will be useful later to model completely
+    passive edges with no excitable dynamics.
+    
+    Parameters
+    ----------
+    Ts : (3,) array
+        active tensions
+    Tps : (3,) array
+        passive tensions
+    k : float
+        passive tension relaxation rate
+    m : float
+        excitable tension exponent
+    k_cutoff : 
+        cutoff for excitable tension. 0 = no cutoff.
+        
+    Returns
+    -------
+    dT_dt : (3,) array
+        time derivative of active tension
+    dTp_dt : (3,) array
+        time derivative of passive tension
+
+
+    """
+    dT_dt = (m!=1)*((Ts-Tps)**m - k_cutoff*(Ts-Tps)**(m+1) - k*Tps) - k*(m==1)*(Ts-1)    
+    dTp_dt = -k*Tps
+    dT_dt -= dT_dt.mean()
+    return dT_dt, dTp_dt
+
+# %% ../01_tension_time_evolution.ipynb 82
+def excitable_dt_act_pass_perimeter_passive_rest(Ts: NDArray[Shape["3"], Float], Tps: NDArray[Shape["3"], Float],
+                                                 k=1, m=2, k_cutoff=0,
+                                                ) -> Tuple[NDArray[Shape["3"],Float],NDArray[Shape["3"],Float]]:
+    """
+    Time derivative of tensions under excitable tension model, including passive tension.
+    
+    Now with a different dynamics for tension in the passive region (i.e. if m=1). Here, tensions relax to
+    the passive tension.
+    
+    Perimeter version -- keeps triangle perimeter fixed. Perimeter of the passive tension may vary of course.
+    
+    Implements the following equations:
+        d_dt T = T^m
+        d_dt T_passive = -k*T_passive
+    
+    with the following additions:
+        - a -k_cutoff*T^(m+1) term which cuts of excitable feedback at large tensions for numerical stability
+        - projection of the d_dt T - vector on triangle-perimter-preserving edge length changes
+    
+    For m==1 (no excitable tension feedback), we implement a special case:
+        d_dt T = -k*(T-1)
+    i.e. tensions relax back to equilateral. This will be useful later to model completely
+    passive edges with no excitable dynamics.
+    
+    Parameters
+    ----------
+    Ts : (3,) array
+        active tensions
+    Tps : (3,) array
+        passive tensions
+    k : float
+        passive tension relaxation rate
+    m : float
+        excitable tension exponent
+    k_cutoff : 
+        cutoff for excitable tension. 0 = no cutoff.
+        
+    Returns
+    -------
+    dT_dt : (3,) array
+        time derivative of active tension
+    dTp_dt : (3,) array
+        time derivative of passive tension
+
+    """
+    if m > 1:
+        dT_dt = (Ts-Tps)**m - k_cutoff*(Ts-Tps)**(m+1) - k*Tps
+        dTp_dt = -k*Tps
+        dT_dt -= dT_dt.mean()
+    elif m == 1:
+        dT_dt = -k*(Ts-Tps)
+        dTp_dt = 0
+        dT_dt -= dT_dt.mean()
+    return dT_dt, dTp_dt
+
+# %% ../01_tension_time_evolution.ipynb 83
+def excitable_dt_act_pass_new(Ts: NDArray[Shape["3"], Float], Tps: NDArray[Shape["3"], Float],
+                              k=1, m=2, k_cutoff=0, is_active=True, subtract_passive=True,
+                             ) -> Tuple[NDArray[Shape["3"],Float],NDArray[Shape["3"],Float]]:
+    """
+    Time derivative of tensions under excitable tension model, including passive tension.
+    
+    New version - implements new post-T1 prescription, toggleable by 'subtract_passive'.
+    
+    Perimeter version -- keeps triangle perimeter fixed.
+    
+    Implements the following equations:
+        d_dt T = T^m
+        d_dt T_passive = -k*T_passive
+    
+    with the following additions:
+        - a -k_cutoff*T^(m+1) term which cuts of excitable feedback at large tensions for numerical stability
+        - projection of the d_dt T - vector on triangle-perimter-preserving edge length changes
+    
+    For is_active == False, we implement tension homeostasis:
+        d_dt T = -k*(T-1)
+    
+    Parameters
+    ----------
+    Ts : (3,) array
+        active tensions
+    Tps : (3,) array
+        passive tensions
+    k : float
+        passive tension relaxation rate
+    m : float
+        excitable tension exponent
+    k_cutoff : 
+        cutoff for excitable tension. 0 = no cutoff.
+    is_active : bool
+        whether to run active feedback, or homeostasis
+    subtract_passive : bool
+        Which post-t1 presciption to implement
+        
+    Returns
+    -------
+    dT_dt : (3,) array
+        time derivative of active tension
+    dTp_dt : (3,) array
+        time derivative of passive tension
+
+
+    """
+    if is_active:
+        if subtract_passive:
+            dT_dt = (Ts-Tps)**m - k_cutoff*(Ts-Tps)**(m+1) - k*Tps
+        else:
+            dT_dt = Ts**m - k_cutoff*Ts**(m+1) - k*Tps
+        dTp_dt = -k*Tps
+        dT_dt -= dT_dt.mean()
+    else:
+        dT_dt = -k*(Ts-1)
+        dTp_dt = np.zeros(3)
+        dT_dt -= dT_dt.mean()
+    return dT_dt, dTp_dt
+
+# %% ../01_tension_time_evolution.ipynb 84
+def excitable_dt_act_pass_new_passive_rest(Ts: NDArray[Shape["3"], Float], Tps: NDArray[Shape["3"], Float],
+                                           k=1, m=2, k_cutoff=0, is_active=True, subtract_passive=True,
+                                          ) -> Tuple[NDArray[Shape["3"],Float],NDArray[Shape["3"],Float]]:
+    """
+    Time derivative of tensions under excitable tension model, including passive tension.
+    
+    New version - implements new post-T1 prescription, toggleable by 'subtract_passive'.
+    
+    Now with a different dynamics for tension in the passive region. Here, tensions relax to
+    the passive tension.
+    
+    Perimeter version -- keeps triangle perimeter fixed.
+    
+    Implements the following equations:
+        d_dt T = T^m
+        d_dt T_passive = -k*T_passive
+    
+    with the following additions:
+        - a -k_cutoff*T^(m+1) term which cuts of excitable feedback at large tensions for numerical stability
+        - projection of the d_dt T - vector on triangle-perimter-preserving edge length changes
+    
+    For is_active == False, we implement tension homeostasis:
+        d_dt T = -k*(T-1)
+    
+    Parameters
+    ----------
+    Ts : (3,) array
+        active tensions
+    Tps : (3,) array
+        passive tensions
+    k : float
+        passive tension relaxation rate
+    m : float
+        excitable tension exponent
+    k_cutoff : 
+        cutoff for excitable tension. 0 = no cutoff.
+    is_active : bool
+        whether to run active feedback, or homeostasis
+    subtract_passive : bool
+        Which post-t1 presciption to implement
+        
+    Returns
+    -------
+    dT_dt : (3,) array
+        time derivative of active tension
+    dTp_dt : (3,) array
+        time derivative of passive tension
+
+
+    """
+    if is_active:
+        if subtract_passive:
+            dT_dt = (Ts-Tps)**m - k_cutoff*(Ts-Tps)**(m+1) - k*Tps
+        else:
+            dT_dt = Ts**m - k_cutoff*Ts**(m+1) - k*Tps
+        dTp_dt = -k*Tps
+        dT_dt -= dT_dt.mean()
+    else:
+        dT_dt = -k*(Ts-Tps)
+        dTp_dt = np.zeros(3)
+        dT_dt -= dT_dt.mean()
+    return dT_dt, dTp_dt
+
+# %% ../01_tension_time_evolution.ipynb 85
+def excitable_dt_act_pass_new_area(Ts: NDArray[Shape["3"], Float], Tps: NDArray[Shape["3"], Float],
+                                   k=1, m=2, k_cutoff=0, is_active=True, subtract_passive=True,
+                                   ) -> Tuple[NDArray[Shape["3"],Float],NDArray[Shape["3"],Float]]:
+    """
+    Time derivative of tensions under excitable tension model, including passive tension.
+    
+    Area version -- keeps triangle area fixed.
+    
+    Implements the following equations:
+        d_dt T = T^m
+        d_dt T_passive = -k*T_passive
+    
+    with the following additions:
+        - a -k_cutoff*T^(m+1) term which cuts of excitable feedback at large tensions for numerical stability
+        - projection of the d_dt T - vector on triangle-area-preserving edge length changes
+    
+    For is_active == False, we implement tension homeostasis:
+        d_dt T = -k*(T-1)
+    i.e. tensions relax back to equilateral. This will be useful later to model completely
+    passive edges with no excitable dynamics.
+    
+    Parameters
+    ----------
+    Ts : (3,) array
+        active tensions
+    Tps : (3,) array
+        passive tensions
+    k : float
+        passive tension relaxation rate
+    m : float
+        excitable tension exponent
+    k_cutoff : 
+        cutoff for excitable tension. 0 = no cutoff.
+        
+    Returns
+    -------
+    dT_dt : (3,) array
+        time derivative of active tension
+    dTp_dt : (3,) array
+        time derivative of passive tension
+
+
+    """
+    if is_active:
+        dTp_dt = -k*Tps
+        if subtract_passive:
+            dT_dt = (Ts-Tps)**m - k_cutoff*(Ts-Tps)**(m+1) - k*Tps
+            area_jac = tns.sides_area_jac(Ts-Tps)
+        else:
+            dT_dt = Ts**m - k_cutoff*Ts**(m+1) - k*Tps
+            area_jac = sides_area_jac(Ts)
+        area_jac /= np.linalg.norm(area_jac)
+        dT_dt -= area_jac * (area_jac@dT_dt)    
+    else:
+        dTp_dt = np.zeros(3)
+        dT_dt = -k*(Ts-1)
+        dT_dt -= dT_dt.mean()
+    return dT_dt, dTp_dt
+
+# %% ../01_tension_time_evolution.ipynb 88
 @patch
 def reset_rest_passive_flip(self: TensionHalfEdgeMesh, e: TensionHalfEdge, method="smooth") -> None:
     """
@@ -478,9 +799,14 @@ def reset_rest_passive_flip(self: TensionHalfEdgeMesh, e: TensionHalfEdge, metho
     twin = e.twin
     rest_pre = (e.rest+twin.rest)/2
     rest_neighbors = (e.nxt.rest+e.prev.rest+twin.nxt.rest+twin.prev.rest)/4
+    
+    # subtract the passive tensions
+    rest_pre -= (e.passive+twin.passive)/2
+    rest_neighbors -= (e.nxt.passive+e.prev.passive+twin.nxt.passive+twin.prev.passive)/4
     if method == "smooth":
         e.rest = np.linalg.norm(e.vertices[0].coords - e.vertices[1].coords)
-        e.passive = (rest_pre+e.rest)-2*rest_neighbors
+        active = 2*rest_neighbors-rest_pre
+        e.passive = e.rest-active
         twin.rest, twin.passive = (e.rest, e.passive)
     elif method == "direct":
         e.rest = rest_neighbors
@@ -489,7 +815,7 @@ def reset_rest_passive_flip(self: TensionHalfEdgeMesh, e: TensionHalfEdge, metho
     else:
         print("method must be smooth or direct")
 
-# %% ../01_tension_time_evolution.ipynb 76
+# %% ../01_tension_time_evolution.ipynb 89
 @patch
 def euler_step(self: TensionHalfEdgeMesh, dt=.005, rhs_tension=excitable_dt_act_pass, params=None,
                rhs_rest_shape: Union[None, callable]=None) -> None:
@@ -532,3 +858,95 @@ def euler_step(self: TensionHalfEdgeMesh, dt=.005, rhs_tension=excitable_dt_act_
     if rhs_rest_shape is not None:
         for v in self.vertices.values():
             v.rest_shape += dt*rhs_rest_shape(v)
+
+# %% ../01_tension_time_evolution.ipynb 90
+@patch
+def euler_maruyama_step(self: TensionHalfEdgeMesh, dt=.005, rhs_tension=excitable_dt_act_pass, sigma=0,
+                        params=None, rhs_rest_shape: Union[None, callable]=None) -> None:
+    """
+    Euler-Maruyama step intrinsic edge length and reference shapes. 
+    
+    In contrast to Euler step, this includes a normal i.i.d. noise term (independent for each half edge).
+    Passive tensions do not fluctuate. Tensions cannot become negative (hard constraint...).
+    Iterates over mesh triangles and cells, updating the intrinsic properties (active and passive tensions,
+    reference shapes) using the provided ODE RHS functions.
+    
+    Implements spatial patterning of the tension evolution equations via the params keyword.
+    
+    Parameters
+    ----------
+    dt : float
+        Time step
+    rhs_tension : callable
+        Function which takes arguments (T_active, T_passive) and returns their time derivatives
+    sigma : float
+        Noise standard deviation
+    params : dict or callable
+        Parameters for the rhs_tension function. Can be a function from face ids -> parameter dict,
+        allowing different triangles to evolve differently.
+    rhs_rest_shape : callable
+        Function which takes a vertex as argument and returns the time derivative of the rest shape
+        (e.g. viscous relaxation). If None, the function returns 0.
+    
+    """
+    # Euler step edges
+    for fc in self.faces.values():
+        # collect edges
+        Ts, Tps = (np.array([he.rest for he in fc.hes]), np.array([he.passive for he in fc.hes]))
+        if isinstance(params, dict):
+            dT_dt, dTp_dt = rhs_tension(Ts, Tps, **params)
+        elif callable(params):
+            dT_dt, dTp_dt = rhs_tension(Ts, Tps, **params(fc._fid))
+        Ts += dt*dT_dt
+        Tps += dt*dTp_dt
+        # noise 
+        Ts += np.sqrt(dt)*np.random.normal(loc=0, scale=sigma)
+        Ts = np.clip(Ts, 0, np.inf)
+        
+        for T, Tp, he in zip(Ts, Tps, fc.hes):
+            he.rest = T
+            he.passive = Tp
+    # Euler step cells, if desired
+    if rhs_rest_shape is not None:
+        for v in self.vertices.values():
+            v.rest_shape += dt*rhs_rest_shape(v)
+
+# %% ../01_tension_time_evolution.ipynb 93
+@patch
+def euler_step_relax(self: TensionHalfEdgeMesh, k_relax: float, dt=.005, update_passive=False) -> None:
+    """
+    Euler step of relaxation of intrinsic edge length towards extrinsic tensions.
+    
+    Iterates over mesh edges. Use together with ``self.flatten_triangulation(reset_intrinsic=False)``:
+    ``
+    mesh.euler_step(dt=dt, rhs_tension=excitable_dt_act_pass, params=param_dict)
+    mesh.flatten_triangulation(reset_intrinsic=False)
+    mesh.euler_step_relax(k_relax=0.5/dt, dt=dt)
+    ``
+    
+    Does NOT update the passive tensions by default. If update_passive is True, update passive tensions
+    so that the ratio passive tension/total tension remains constant.
+    
+    k_relax -> infty corresponds to instantabeous flattening.
+    
+    
+    Parameters
+    ----------
+    dt : float
+        Time step
+    k_relax : float
+        Relaxation rate
+    
+    """
+    # compute extrinsic edgle lengths
+    edge_lens = self.get_edge_lens()
+    # Euler step edges
+    for he in self.hes.values():
+        # collect edges
+        Ts_intrisic, Ts_extrinsic = (he.rest, edge_lens[he._heid])
+        # exact integration, we wouldn't want to accidentally create Euler instabiliy
+        Ts_intrinsic_next = Ts_extrinsic + (Ts_intrisic-Ts_extrinsic) * np.exp(-k_relax*dt)
+        he.rest = Ts_intrinsic_next
+        if update_passive: # update passive tensions to that the ratio active/passive remains constant
+            he.passive *= (Ts_intrinsic_next/Ts_intrisic)
+        
