@@ -212,7 +212,7 @@ k_relax = 2
 k_passive = 6
 
 orientations = ["parallel", "orthogonal"]
-isogonals = [0.4,] 
+isogonals = [0.35,] 
 reps = np.array([1, 2, 3]) # number of replicates # 1, 2, 3
 to_do = list(itertools.product(orientations, isogonals, [k_relax,], [k_passive,], reps))
 
