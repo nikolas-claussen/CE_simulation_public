@@ -50,12 +50,12 @@ config.update("jax_debug_nans", False)
 timeout_iteration = 20*60 
 
 # initial condition parameters
-n_x = 35
-n_y = 30
+n_x = 35 # for cable: 35, 30. for bridge: 26, 42
+n_y = 30 
 
 noise_gaussian = 0.075
 isogonal = 0
-orientation = "cable"
+orientation = "cable" #"cable"
 
 # triangulation dynamics parameters
 m = 4
@@ -103,7 +103,7 @@ def run_phase_diagm_sim(initial_strain, eta, n_steps, random_seed=None, run_id=0
     for the same parameter values.
     """
     # define directiory for saving stuff
-    save_dir = f"{base_dir}/{run_id}/eta_{eta}_anisotropy_{initial_strain}_randomSeed_{random_seed}"
+    save_dir = f"{base_dir}/{run_id}/eta_{eta}_anisotropy_{initial_strain}_randomSeed_{random_seed}" # _bridge
     initial_strain = np.sqrt(1+initial_strain)-1 # transform due to sqrt(1+s) convention
     try:
         os.makedirs(save_dir, exist_ok=True)
@@ -203,19 +203,19 @@ def run_phase_diagm_sim(initial_strain, eta, n_steps, random_seed=None, run_id=0
 # define simulation sweep
 ###############################################
 
-initial_strains = np.array([0.05, 0.1, 0.15, 0.2, 0.25, 0.3])  
-etas = [0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9]
-reps = np.array([4, 5, 6]) # number of replicates # 1, 2, 3
+initial_strains = np.array([0.35, 0.4, 0.45]) #np.array([0.05, 0.1, 0.15, 0.2, 0.25, 0.3])  
+etas = [0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9] #  [0.8, 0.85, 0.9,] #
+reps = [4, 5, 6] #np.array([4, 5, 6]) # number of replicates # 1, 2, 3
 to_do = list(itertools.product(initial_strains, etas, reps))
 
 n_steps = 500
-run_id = "perimeter_phase_diag_new_post_T1_once_more"
+run_id = "order_aniso_phase_diag"
 
 ###############################################
 # run simulation
 ###############################################
 
-Parallel(n_jobs=30, prefer=None)(delayed(run_phase_diagm_sim)( 
+Parallel(n_jobs=15, prefer=None)(delayed(run_phase_diagm_sim)( 
     initial_strain, eta,
     n_steps=n_steps, random_seed=rep, run_id=run_id)
     for initial_strain, eta, rep in to_do)
