@@ -48,13 +48,13 @@ from nptyping import NDArray, Int, Float, Shape
 
 from fastcore.foundation import patch
 
-# %% ../11_saturating_feedback.ipynb 65
+# %% ../11_saturating_feedback.ipynb 26
 def excitable_dt(Ts, m=4, k_cutoff=0):
     dT_dt = Ts**m - k_cutoff*Ts**(m+1)
     dT_dt -= dT_dt.mean()
     return dT_dt
 
-# %% ../11_saturating_feedback.ipynb 66
+# %% ../11_saturating_feedback.ipynb 27
 def excitable_dt_act_pass(Ts: NDArray[Shape["3"], Float], Tps: NDArray[Shape["3"], Float],
                           k=1, m=2, k_cutoff=0, is_active=True, subtract_passive=True,
                          ) -> Tuple[NDArray[Shape["3"],Float],NDArray[Shape["3"],Float]]:
@@ -111,7 +111,7 @@ def excitable_dt_act_pass(Ts: NDArray[Shape["3"], Float], Tps: NDArray[Shape["3"
         dT_dt -= dT_dt.mean()
     return dT_dt, dTp_dt
 
-# %% ../11_saturating_feedback.ipynb 67
+# %% ../11_saturating_feedback.ipynb 28
 # define saturating feedback function
 
 def saturating_dt(Ts, T_minus=0, T_c=1, T_plus=2):
@@ -119,7 +119,7 @@ def saturating_dt(Ts, T_minus=0, T_c=1, T_plus=2):
     dT_dt -= dT_dt.mean()
     return dT_dt
 
-# %% ../11_saturating_feedback.ipynb 68
+# %% ../11_saturating_feedback.ipynb 29
 # define saturating feedback function
 
 def saturating_dt_act_pass(Ts: NDArray[Shape["3"], Float], Tps: NDArray[Shape["3"], Float],

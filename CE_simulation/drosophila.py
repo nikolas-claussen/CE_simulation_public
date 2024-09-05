@@ -114,7 +114,7 @@ fridtjof_colors_new = np.array([mpl.colors.to_rgb(x) for x in fridtjof_colors_ne
 
 # %% ../04_drosophila_simulation.ipynb 15
 def create_rect_initial(nx, ny, noise=0, initial_strain=0, isogonal=0, orientation='orthogonal',
-                        boundaries=None, w_passive=0, w_passive_lr=0, bdry_x=None, bdry_y=None,
+                        boundaries=None, w_passive=0, w_passive_lr=0, w_bdry=.4, bdry_x=None, bdry_y=None,
                         random_seed=0):
     """
     Create initial condition for germ band simulations.
@@ -173,8 +173,6 @@ def create_rect_initial(nx, ny, noise=0, initial_strain=0, isogonal=0, orientati
 
     bdry_x = np.ceil(max_x_cells) if bdry_x is None else bdry_x
     bdry_y = np.ceil(max_y_cells) if bdry_y is None else bdry_y
-    
-    w_bdry = .4
     
     if 'top' in boundaries:
         top_ids = []

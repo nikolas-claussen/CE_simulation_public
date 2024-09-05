@@ -411,7 +411,7 @@ def get_hexatic_order(self: msh.Vertex, use_tension_vertices=True):
     angles = np.stack([tns.vectors_angle(a, b) for a,b in zip(edges, np.roll(edges, 1, axis=0))])
     return np.exp(1j*6*angles).mean()
 
-# %% ../09b_disorder_phase_diagram.ipynb 74
+# %% ../09b_disorder_phase_diagram.ipynb 66
 from skimage import graph
 
 def get_left_right_pt(mesh):
@@ -503,7 +503,7 @@ def get_width_centerline(mesh, top_bdry, bottom_bdry, centerline):
 
     return 2*np.median(top_dist+bottom_dist)
 
-# %% ../09b_disorder_phase_diagram.ipynb 112
+# %% ../09b_disorder_phase_diagram.ipynb 94
 def get_tissue_extension(meshes, sigma=2, q=0.9, log=True, exclude=None):
     """Get tissue extension by means of q% x- and y-axis bounding box"""
     exclude = [] if exclude is None else exclude
@@ -518,6 +518,3 @@ def get_tissue_extension(meshes, sigma=2, q=0.9, log=True, exclude=None):
         delta_log = np.log(delta_smooth)
         return delta_log
     return delta_smooth
-
-# %% ../09b_disorder_phase_diagram.ipynb 119
-from joblib import Parallel, delayed

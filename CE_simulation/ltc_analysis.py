@@ -55,14 +55,14 @@ from nptyping import NDArray, Int, Float, Shape
 
 from fastcore.foundation import patch
 
-# %% ../13_ltc_distribution_analysis.ipynb 31
+# %% ../13_ltc_distribution_analysis.ipynb 33
 def weighted_quantiles(values, weights, quantiles=0.5):
     """Source: https://stackoverflow.com/questions/20601872/numpy-or-scipy-to-calculate-weighted-median"""
     i = np.argsort(values)
     c = np.cumsum(weights[i])
     return values[i[np.searchsorted(c, np.array(quantiles) * c[-1])]]
 
-# %% ../13_ltc_distribution_analysis.ipynb 85
+# %% ../13_ltc_distribution_analysis.ipynb 86
 def reduce_identical_blocks(lst):
     """Reduce blocks of identical elements in lst to single entry, i.e. [a,a,a,b,b] -> [a, b]"""
     reduced = [lst[0]]
@@ -75,7 +75,7 @@ def has_rev(lst, dist=2):
     """Does the list have a reversible change with given distance, e.g. [a,b,a,c,d], with dist=2"""
     return [lst[i]==lst[i+2] for i in range(len(lst)-2)]
 
-def get_irrev_T1s(meshes):
+def get_irrev_T1s(meshes, dist=2):
     """Returns a dict {he: [timepoints,]}. Assumes meshes always has same edges. T1s are dated to the definitive emergence of the new interface"""
     T1_dict = {}
     keys = [he._heid for he in meshes[0].hes.values() if not he.duplicate]
@@ -90,7 +90,6 @@ def get_irrev_T1s(meshes):
         which_one = np.array([[ix for ix, x in enumerate(uniques) if vs == x][0] for vs in vertices])
         reduced = reduce_identical_blocks(which_one)
         irrev = deepcopy(reduced)
-        dist = 2
         while any(has_rev(irrev, dist=dist)):
             where = np.where(has_rev(irrev, dist=dist))[0][0]
             del irrev[where:where+dist]

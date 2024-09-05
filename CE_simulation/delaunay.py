@@ -202,8 +202,8 @@ def create_rect_mesh_angle(nx: int, ny: int, angle=0, noise=0, max_l=1.2) -> msh
 # %% ../02_delaunay_simulation.ipynb 18
 def get_inertia(pts: NDArray[Shape["*,2"],Float], q=0) -> NDArray[Shape["2,2"],Float]:
     """Get inertia tensor of point cloud. q in [0, 1) removes points with outlier x/y coordinates"""
-    pts -= trim_mean(pts,q, axis=0)
-    x, y = pts.T
+    pts_nomean = pts - trim_mean(pts,q, axis=0)
+    x, y = pts_nomean.T
     Ixx = trim_mean(x**2, q)
     Ixy = trim_mean(x*y, q)
     Iyy = trim_mean(y**2, q)
